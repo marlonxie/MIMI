@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Environments
+.env
+*.env
+
+# ChromaDB local storage
+mimi-backend/rag/chroma_store/
+
+# Whisper model cache
+*.pt
+
+# macOS
+.DS_Store
+
+# Xcode
+mimi-app/.build/
+mimi-app/DerivedData/
+
+# IDE
+.vscode/
+.idea/
+
+# Audio test files (large)
+*.wav
+*.mp3
+*.m4a
+!resources/

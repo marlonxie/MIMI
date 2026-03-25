@@ -1,0 +1,50 @@
+# MIMI 面试助手配置文件
+
+server:
+  host: "127.0.0.1"
+  port: 8765
+
+stt:
+  # whisper 模型大小: tiny, base, small, medium, large
+  # M2 Pro 16GB 推荐 small（速度和精度平衡）
+  model_size: "small"
+  # 支持的语言
+  languages: ["en", "de"]
+
+translator:
+  # provider: "gemini" 或 "claude"
+  provider: "gemini"
+  # Gemini 模型（改 provider 时同步改 model）
+  # gemini: gemini-2.5-flash / gemini-2.5-pro / gemini-2.0-flash
+  # claude: claude-sonnet-4-20250514
+  model: "gemini-2.5-flash"
+  # 目标翻译语言
+  target_language: "zh"
+
+conversation:
+  # 上下文窗口大小（最近 N 句对话）
+  context_window_size: 10
+  # 对话记录导出路径
+  export_path: "./transcripts"
+
+rag:
+  # embedding 模型（本地运行，22MB）
+  embedding_model: "all-MiniLM-L6-v2"
+  # 检索返回的文档数量
+  top_k: 3
+  # 检索类型: similarity 或 mmr（最大边际相关性，结果更多样化）
+  search_type: "mmr"
+  # 文档切片大小
+  chunk_size: 500
+  # 切片重叠
+  chunk_overlap: 50
+  # ChromaDB 存储路径
+  chroma_path: "./rag/chroma_store"
+  # 资料目录（相对于项目根目录）
+  resources_path: "../resources"
+
+audio:
+  # 采样率
+  sample_rate: 16000
+  # 每次发送的音频块大小（秒）
+  chunk_duration: 3
