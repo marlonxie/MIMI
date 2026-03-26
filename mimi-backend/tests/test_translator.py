@@ -54,6 +54,33 @@ async def test_translate_async():
     assert result["translation"]
 
 
+def test_translate_with_context():
+    """测试：带对话上下文的翻译"""
+    translator = Translator()
+    context = (
+        "[Interviewer] We use a microservices architecture here.\n"
+        "[Me] I have experience with that approach."
+    )
+    result = translator.translate(
+        "How did you handle service discovery?",
+        source_language="en",
+        context=context,
+    )
+    print(f"上下文翻译测试:")
+    print(f"  上下文: {context[:50]}...")
+    print(f"  原文: {result['original']}")
+    print(f"  翻译: {result['translation']}")
+    assert result["translation"]
+
+
+def test_translate_empty_context():
+    """测试：空上下文（传空字符串）"""
+    translator = Translator()
+    result = translator.translate("Hello.", source_language="en", context="")
+    print(f"空上下文测试: translation='{result['translation']}'")
+    assert result["translation"]
+
+
 if __name__ == "__main__":
     print("=" * 50)
     print("MIMI 翻译模块测试 (LangChain + Gemini)")
@@ -71,5 +98,11 @@ if __name__ == "__main__":
 
     print("\n--- 测试异步翻译 ---")
     asyncio.run(test_translate_async())
+
+    print("\n--- 测试上下文翻译 ---")
+    test_translate_with_context()
+
+    print("\n--- 测试空上下文 ---")
+    test_translate_empty_context()
 
     print("\n所有测试完成!")

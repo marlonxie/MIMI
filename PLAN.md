@@ -55,7 +55,7 @@
 - 利用 Whisper segments 标点分句（不固定 3 秒切割）
 - 完整对话记录，面试后可导出 JSON 回顾
 - 上下文窗口（最近 N 句）给翻译和 RAG 使用
-- 说话人切换检测（面试官说完 → 触发回答提示）
+- `has_new_interviewer_speech()` 检查新面试官发言
 
 ### 2.2 文档索引 ✅
 - **文件**: `mimi-backend/rag/indexer.py`
@@ -73,7 +73,7 @@
 
 ### 2.4 server.py 集成 ✅
 - 两种 WebSocket 消息类型：`"type": "translation"` + `"type": "suggestion"`
-- 翻译区每句话实时更新，提示区面试官说完后触发
+- 翻译区每句话实时更新，提示区 debounce 触发（面试官最后一句后 N 秒无新句子才生成，新提示覆盖旧提示）
 - RAG 引擎可选加载（无索引时自动跳过）
 - 断开连接时自动导出对话记录
 

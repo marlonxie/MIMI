@@ -66,4 +66,4 @@ Swift App (planned) ──WebSocket──→ Python Backend (FastAPI)
 - **Audio format**: Always PCM float32, 16kHz mono. Whisper auto-detects language (en/de)
 - **Async in WebSocket handlers**: Use `await chain.ainvoke()` for LangChain calls inside FastAPI WebSocket endpoints
 - **Sentence segmentation**: ConversationManager splits text by punctuation (.?!), not by fixed time chunks. Pending text is buffered until sentence completes
-- **Suggestion trigger**: Fires when `speaker == "interviewer"` and last history entry is also from interviewer (speaker change detection)
+- **Suggestion trigger**: Debounce mode — interviewer says a sentence → start N-second timer. New sentence resets timer. Timer expires → generate suggestion using all consecutive interviewer sentences. New suggestion replaces old one. Delay configurable via `conversation.suggestion_debounce` in config.yaml

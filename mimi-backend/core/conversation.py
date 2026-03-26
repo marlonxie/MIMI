@@ -112,18 +112,12 @@ class ConversationManager:
 
         return "\n".join(lines)
 
-    def should_trigger_suggestion(self, current_speaker: str) -> bool:
-        """
-        判断是否应该触发回答提示。
-
-        触发条件：上一句是面试官说的（意味着面试官刚说完，该我回答了）
-        """
-        if len(self.history) < 1:
-            return False
-
-        last_entry = self.history[-1]
-        # 面试官刚说完一句话 → 触发提示
-        return last_entry["speaker"] == "interviewer" and current_speaker == "interviewer"
+    def has_new_interviewer_speech(self, since_index: int) -> bool:
+        """检查从 since_index 之后是否有新的面试官发言"""
+        for entry in self.history[since_index:]:
+            if entry["speaker"] == "interviewer":
+                return True
+        return False
 
     def get_last_interviewer_text(self) -> str:
         """获取面试官最近说的完整内容（可能跨多句）"""

@@ -24,6 +24,8 @@ translator:
 conversation:
   # 上下文窗口大小（最近 N 句对话）
   context_window_size: 10
+  # 面试官最后一句后等几秒再触发回答提示（debounce）
+  suggestion_debounce: 3.0
   # 对话记录导出路径
   export_path: "./transcripts"
 

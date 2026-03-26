@@ -85,18 +85,15 @@ class RAGEngine:
             temperature=0.5,
         )
 
-        # LCEL chain
-        self.chain = (
-            {
-                "context": (lambda x: x["latest_text"]) | self.retriever | _format_docs,
-                "latest_text": lambda x: x["latest_text"],
-                "conversation": lambda x: x.get("conversation", ""),
-                "interview_language": lambda x: x.get("interview_language", "English"),
-            }
-            | RAG_PROMPT
-            | self.llm
-            | StrOutputParser()
-        )
+        # LLM chain（不含 retriever，retriever 单独调用避免重复检索）
+        self.answer_chain = RAG_PROMPT | self.llm | StrOutputParser()
+
+    def _retrieve_and_format(self, query: str) -> tuple[str, list[str]]:
+        """检索相关文档，返回 (格式化文本, 来源列表)"""
+        docs = self.retriever.invoke(query)
+        context = _format_docs(docs)
+        sources = list({doc.metadata.get("source", "unknown") for doc in docs})
+        return context, sources
 
     async def generate_suggestion(
         self, latest_text: str, language: str, conversation_context: str = ""
@@ -114,12 +111,11 @@ class RAGEngine:
         """
         interview_language = LANG_MAP.get(language, "English")
 
-        # 先检索相关文档（用于返回 sources）
-        docs = self.retriever.invoke(latest_text)
-        sources = list({doc.metadata.get("source", "unknown") for doc in docs})
+        # 检索一次，同时用于 context 和 sources
+        context, sources = self._retrieve_and_format(latest_text)
 
-        # 生成回答提示
-        suggestion = await self.chain.ainvoke({
+        suggestion = await self.answer_chain.ainvoke({
+            "context": context,
             "latest_text": latest_text,
             "conversation": conversation_context,
             "interview_language": interview_language,
@@ -136,10 +132,10 @@ class RAGEngine:
         """同步版本（用于测试）"""
         interview_language = LANG_MAP.get(language, "English")
 
-        docs = self.retriever.invoke(latest_text)
-        sources = list({doc.metadata.get("source", "unknown") for doc in docs})
+        context, sources = self._retrieve_and_format(latest_text)
 
-        suggestion = self.chain.invoke({
+        suggestion = self.answer_chain.invoke({
+            "context": context,
             "latest_text": latest_text,
             "conversation": conversation_context,
             "interview_language": interview_language,

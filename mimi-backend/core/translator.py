@@ -86,7 +86,7 @@ class Translator:
 
         source_hint = self._get_source_hint(source_language)
         translation = self.chain.invoke({
-            "text": text, "source_hint": source_hint, "context": context or "(无上下文)"
+            "text": text, "source_hint": source_hint, "context": context or ""
         })
 
         return {
@@ -110,7 +110,7 @@ class Translator:
 
         source_hint = self._get_source_hint(source_language)
         translation = await self.chain.ainvoke({
-            "text": text, "source_hint": source_hint, "context": context or "(无上下文)"
+            "text": text, "source_hint": source_hint, "context": context or ""
         })
 
         return {

@@ -50,7 +50,7 @@ async def lifespan(app):
 
 
 # 初始化 FastAPI
-app = FastAPI(title="MIMI 面试助手", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="MIMI 面试助手", version="0.3.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -64,7 +64,7 @@ app.add_middleware(
 async def health():
     return {
         "status": "ok",
-        "version": "0.2.0",
+        "version": "0.3.0",
         "rag_enabled": rag_engine is not None,
     }
 
@@ -82,7 +82,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
     服务端返回两种消息:
         {"type": "translation", ...}   → 翻译区
-        {"type": "suggestion", ...}    → 回答提示区
+        {"type": "suggestion", ...}    → 回答提示区（debounce 触发）
     """
     await websocket.accept()
     source = "interviewer"
@@ -90,6 +90,8 @@ async def websocket_endpoint(websocket: WebSocket):
         context_window_size=config.get("conversation", {}).get("context_window_size", 10),
         export_path=config.get("conversation", {}).get("export_path", "./transcripts"),
     )
+    suggestion_task: asyncio.Task | None = None
+    debounce_delay = config.get("conversation", {}).get("suggestion_debounce", 3.0)
     print("WebSocket 客户端已连接")
 
     try:
@@ -112,7 +114,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 elif msg_type == "flush":
                     flushed = conversation.flush()
                     for sentence in flushed:
-                        await _process_sentence(websocket, sentence, conversation, source)
+                        await _send_translation(websocket, sentence, conversation)
 
                 continue
 
@@ -135,29 +137,40 @@ async def websocket_endpoint(websocket: WebSocket):
 
                 # 处理每个完成的句子
                 for sentence in completed_sentences:
-                    await _process_sentence(websocket, sentence, conversation, source)
+                    # 翻译区：每句话立即翻译
+                    await _send_translation(websocket, sentence, conversation)
+
+                    # 回答提示区：面试官说话时启动/重置 debounce 计时器
+                    if sentence["speaker"] == "interviewer" and rag_engine:
+                        if suggestion_task and not suggestion_task.done():
+                            suggestion_task.cancel()
+                        suggestion_task = asyncio.create_task(
+                            _debounce_suggestion(
+                                websocket, conversation, rag_engine,
+                                sentence["language"], debounce_delay
+                            )
+                        )
 
     except WebSocketDisconnect:
-        # 导出对话记录
+        if suggestion_task and not suggestion_task.done():
+            suggestion_task.cancel()
         if conversation.history:
             filepath = conversation.export_transcript()
             print(f"对话记录已保存: {filepath}")
         print("WebSocket 客户端断开连接")
     except Exception as e:
+        if suggestion_task and not suggestion_task.done():
+            suggestion_task.cancel()
         print(f"WebSocket 错误: {e}")
-        await websocket.close()
 
 
-async def _process_sentence(
+async def _send_translation(
     websocket: WebSocket,
     sentence: dict,
     conversation: ConversationManager,
-    current_source: str,
 ):
-    """处理一个完成的句子：翻译 + 可选回答提示"""
+    """翻译并发送一个完成的句子"""
     context = conversation.get_context_window()
-
-    # 翻译区：每句话都翻译
     translation_result = await translator.translate_async(
         sentence["text"], sentence["language"], context=context
     )
@@ -170,22 +183,35 @@ async def _process_sentence(
         "timestamp": sentence["timestamp"],
     })
 
-    # 回答提示区：面试官说完后触发
-    if rag_engine and conversation.should_trigger_suggestion(current_source):
+
+async def _debounce_suggestion(
+    websocket: WebSocket,
+    conversation: ConversationManager,
+    rag_engine,
+    language: str,
+    delay: float = 3.0,
+):
+    """等待 delay 秒后生成回答提示。被 cancel 说明面试官还在说话。"""
+    try:
+        await asyncio.sleep(delay)
         latest_text = conversation.get_last_interviewer_text()
-        try:
-            suggestion = await rag_engine.generate_suggestion(
-                latest_text=latest_text,
-                language=sentence["language"],
-                conversation_context=context,
-            )
-            await websocket.send_json({
-                "type": "suggestion",
-                "suggestion": suggestion["suggestion"],
-                "sources": suggestion["sources"],
-            })
-        except Exception as e:
-            print(f"RAG 提示生成失败: {e}")
+        if not latest_text:
+            return
+        context = conversation.get_context_window()
+        suggestion = await rag_engine.generate_suggestion(
+            latest_text=latest_text,
+            language=language,
+            conversation_context=context,
+        )
+        await websocket.send_json({
+            "type": "suggestion",
+            "suggestion": suggestion["suggestion"],
+            "sources": suggestion["sources"],
+        })
+    except asyncio.CancelledError:
+        pass  # 被取消说明面试官还在说话，正常行为
+    except Exception as e:
+        print(f"RAG 提示生成失败: {e}")
 
 
 if __name__ == "__main__":
