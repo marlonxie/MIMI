@@ -21,7 +21,13 @@ mimi-backend/rag/chroma_store/
 
 # Xcode
 mimi-app/.build/
+mimi-app/.swiftpm/
 mimi-app/DerivedData/
+mimi-app/MimiApp.xcodeproj/xcuserdata/
+mimi-app/MimiApp.xcodeproj/project.xcworkspace/xcuserdata/
+
+# Runtime output
+mimi-backend/transcripts/
 
 # IDE
 .vscode/
