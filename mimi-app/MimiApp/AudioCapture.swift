@@ -15,6 +15,7 @@ class AudioCaptureManager {
     private var scStream: SCStream?
     private var systemBuffer = Data()
     private var systemAudioHandler: SystemAudioOutputHandler?  // 强引用，防止被释放
+    private var videoHandler: DiscardVideoHandler?             // 强引用
 
     // MARK: - Start / Stop
 
@@ -155,6 +156,7 @@ class AudioCaptureManager {
         self.systemAudioHandler = outputHandler  // 保持强引用
         // 添加视频 handler（丢弃帧，防止 "stream output NOT found" 错误）
         let videoHandler = DiscardVideoHandler()
+        self.videoHandler = videoHandler
         try stream.addStreamOutput(videoHandler, type: .screen,
                                    sampleHandlerQueue: DispatchQueue(label: "discard-video"))
         try stream.addStreamOutput(outputHandler, type: .audio,

@@ -28,7 +28,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 500, height: 400),
+            contentRect: NSRect(x: 0, y: 0, width: 500, height: 450),
             styleMask: [.titled, .closable, .resizable, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -43,46 +43,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         panel.titlebarAppearsTransparent = true
         panel.titleVisibility = .hidden
 
-        // 居中偏右上
         if let screen = NSScreen.main {
             let x = screen.frame.width - 520
-            let y = screen.frame.height - 450
+            let y = screen.frame.height - 500
             panel.setFrameOrigin(NSPoint(x: x, y: y))
         }
 
+        // 只创建一次 — @Observable appState 自动驱动 SwiftUI 更新
         let hostingView = NSHostingView(
-            rootView: OverlayWindowContent(
-                translations: appState.translations,
-                suggestion: appState.currentSuggestion
-            )
+            rootView: OverlayWindowContent(appState: appState)
         )
         panel.contentView = hostingView
         panel.makeKeyAndOrderFront(nil)
         overlayPanel = panel
-
-        // 监听 appState 变化，更新窗口内容
-        startUpdating(appState: appState)
     }
 
     func hideOverlay() {
         overlayPanel?.close()
         overlayPanel = nil
-    }
-
-    private func startUpdating(appState: AppState) {
-        Task { @MainActor in
-            while overlayPanel != nil {
-                try? await Task.sleep(for: .milliseconds(300))
-                guard let panel = overlayPanel, let state = self.appState else { break }
-                let hostingView = NSHostingView(
-                    rootView: OverlayWindowContent(
-                        translations: state.translations,
-                        suggestion: state.currentSuggestion
-                    )
-                )
-                panel.contentView = hostingView
-            }
-        }
     }
 }
 

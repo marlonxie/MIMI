@@ -1,23 +1,18 @@
 import SwiftUI
 
 struct OverlayWindowContent: View {
-    let translations: [TranslationEntry]
-    let suggestion: String?
+    @Bindable var appState: AppState
 
     var body: some View {
-        VStack(spacing: 0) {
+        VSplitView {
             // 翻译区
             translationSection
-
-            Divider()
-                .background(Color.white.opacity(0.3))
 
             // 提示区
             suggestionSection
         }
-        .frame(minWidth: 500, maxWidth: 500, minHeight: 300, maxHeight: 600)
+        .frame(minWidth: 450, minHeight: 300)
         .background(Color.black.opacity(0.85))
-        .cornerRadius(12)
     }
 
     // MARK: - 翻译区
@@ -29,6 +24,9 @@ struct OverlayWindowContent: View {
                     .font(.caption)
                     .foregroundColor(.gray)
                 Spacer()
+                Text("\(appState.translations.count) 条")
+                    .font(.caption2)
+                    .foregroundColor(.gray)
             }
             .padding(.horizontal, 12)
             .padding(.top, 8)
@@ -36,15 +34,16 @@ struct OverlayWindowContent: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 6) {
-                        ForEach(translations) { entry in
+                        ForEach(appState.translations) { entry in
                             TranslationRow(entry: entry)
                                 .id(entry.id)
                         }
                     }
                     .padding(.horizontal, 12)
+                    .padding(.bottom, 8)
                 }
-                .onChange(of: translations.count) {
-                    if let last = translations.last {
+                .onChange(of: appState.translations.count) {
+                    if let last = appState.translations.last {
                         withAnimation {
                             proxy.scrollTo(last.id, anchor: .bottom)
                         }
@@ -69,11 +68,12 @@ struct OverlayWindowContent: View {
             .padding(.top, 8)
 
             ScrollView {
-                if let suggestion {
+                if let suggestion = appState.currentSuggestion {
                     Text(suggestion)
                         .font(.system(size: 13))
                         .foregroundColor(.white)
                         .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 12)
                         .padding(.bottom, 8)
                 } else {
