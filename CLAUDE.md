@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-MIMI 面试助手 — macOS interview assistant for Mandarin native speakers doing English/German interviews. Mixed architecture: Python backend (FastAPI + WebSocket) + Swift native frontend (planned).
+MIMI 面试助手 — macOS interview assistant for Mandarin native speakers doing English/German interviews. Mixed architecture: Python backend (FastAPI + WebSocket) + Swift native frontend (SwiftUI + ScreenCaptureKit).
 
 ## Commands
 
@@ -41,16 +41,16 @@ cd mimi-backend
 ## Architecture
 
 ```
-Swift App (planned) ──WebSocket──→ Python Backend (FastAPI)
-                                      │
-                          ┌───────────┼───────────────┐
-                          ▼           ▼               ▼
-                     core/stt.py  core/translator.py  rag/engine.py
-                     (Whisper,    (LangChain LCEL,    (LangChain RAG,
-                      local)      Gemini/Claude)      ChromaDB + embeddings)
-                                      │
-                              core/conversation.py
-                              (句子分割 + 对话记录 + 上下文窗口)
+Swift App (SwiftUI) ──WebSocket──→ Python Backend (FastAPI)
+│                                      │
+├── ScreenCaptureKit (系统音频)    ┌────┼───────────────┐
+├── AVAudioEngine (麦克风)        ▼    ▼               ▼
+└── NSPanel (悬浮字幕窗)      core/stt  core/translator  rag/engine
+                              (Whisper, (LangChain LCEL, (LangChain RAG,
+                               local)   Gemini/Claude)   ChromaDB)
+                                        │
+                                core/conversation.py
+                                (句子分割 + 对话记录 + 上下文窗口)
 ```
 
 - **Two WebSocket message types**: `"type": "translation"` (every sentence, realtime) and `"type": "suggestion"` (after interviewer finishes speaking, with RAG answer hints)

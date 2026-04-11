@@ -18,6 +18,9 @@ class WebSocketClient {
     }
 
     func connect() {
+        // 清理旧的 session（如果有）
+        session?.invalidateAndCancel()
+
         let delegate = WebSocketDelegate { [weak self] in
             Task { @MainActor in
                 self?.isConnected = true
@@ -28,7 +31,7 @@ class WebSocketClient {
             Task { @MainActor in
                 self?.isConnected = false
                 print("WebSocket 已断开")
-                self?.attemptReconnect()
+                // 不在这里重连，由 receiveMessage 失败统一触发
             }
         }
         session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
@@ -106,15 +109,16 @@ class WebSocketClient {
     }
 
     private func attemptReconnect() {
-        guard reconnectAttempts < maxReconnectAttempts else { return }
+        // 防止并发重连：如果已经在重连或已连接，跳过
+        guard !isConnected, reconnectAttempts < maxReconnectAttempts else { return }
         reconnectAttempts += 1
         let delay = min(pow(2.0, Double(reconnectAttempts)), 30.0)
         let attempt = reconnectAttempts
         Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(delay))
+            guard let self, !self.isConnected else { return }
             print("重连中... (第 \(attempt) 次)")
-            self?.disconnect()
-            self?.connect()
+            self.connect()
         }
     }
 

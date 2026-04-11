@@ -92,6 +92,7 @@ async def websocket_endpoint(websocket: WebSocket):
     )
     suggestion_task: asyncio.Task | None = None
     debounce_delay = config.get("conversation", {}).get("suggestion_debounce", 3.0)
+    enable_suggestion = config.get("conversation", {}).get("enable_suggestion", True)
     print("WebSocket 客户端已连接")
 
     try:
@@ -141,7 +142,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     await _send_translation(websocket, sentence, conversation)
 
                     # 回答提示区：面试官说话时启动/重置 debounce 计时器
-                    if sentence["speaker"] == "interviewer" and rag_engine:
+                    if sentence["speaker"] == "interviewer" and rag_engine and enable_suggestion:
                         if suggestion_task and not suggestion_task.done():
                             suggestion_task.cancel()
                         suggestion_task = asyncio.create_task(

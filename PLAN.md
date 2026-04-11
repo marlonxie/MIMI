@@ -12,8 +12,8 @@
 | 阶段 0：环境准备 | ✅ 完成 | brew 依赖、项目骨架、git init |
 | 阶段 1：Python 后端核心 | ✅ 完成 | server.py + stt.py + translator.py（LangChain + Gemini） |
 | 阶段 2：对话管理 + RAG 问答 | ✅ 完成 | 对话管理器 + 文档索引 + RAG 提示生成 |
-| 阶段 3：Swift 前端 | ⬜ 未开始 | 等待 macOS 更新 + Xcode 安装 |
-| 阶段 4：打磨 | ⬜ 未开始 | 快捷键、一键启动、UI 美化 |
+| 阶段 3：Swift 前端 | ✅ 完成 | MenuBarExtra + NSPanel 悬浮窗 + ScreenCaptureKit + AVAudioEngine |
+| 阶段 4：打磨 | 🔧 进行中 | WebSocket 断连修复、Info.plist 配置、UI 优化 |
 
 ---
 
@@ -82,35 +82,43 @@
 
 ---
 
-## 阶段 3：Swift 前端
+## 阶段 3：Swift 前端 ✅
 
-> 前置条件：macOS 15.6 + Xcode 安装完成
+> 环境：macOS 26.3 + Xcode 26.3 + Swift 6.2
 
-### 3.1 SwiftUI macOS App 骨架
-- **文件**: `mimi-app/Sources/MimiApp/MimiApp.swift`
-- 菜单栏图标 + 悬浮窗
+### 3.1 SwiftUI macOS App ✅
+- **文件**: `mimi-app/MimiApp/MimiApp.swift`
+- MenuBarExtra 菜单栏图标 + AppDelegate 管理 NSPanel 悬浮窗
+- @Observable AppState 驱动 UI 自动更新
 
-### 3.2 悬浮字幕窗口
-- **文件**: `mimi-app/Sources/MimiApp/OverlayWindow.swift`
-- 半透明、置顶、可拖拽
-- 两个区域：翻译区 + 回答提示区
+### 3.2 悬浮字幕窗口 ✅
+- **文件**: `mimi-app/MimiApp/OverlayWindow.swift`
+- NSPanel 半透明、置顶、可拖拽
+- VSplitView：翻译区（上）+ 回答提示区（下），独立滚动
 
-### 3.3 音频捕获
-- **文件**: `mimi-app/Sources/MimiApp/AudioCapture.swift`
-- `ScreenCaptureKit` 捕获系统音频（面试官）
-- `AVAudioEngine` 捕获麦克风（自己）
+### 3.3 音频捕获 ✅
+- **文件**: `mimi-app/MimiApp/AudioCapture.swift`
+- `ScreenCaptureKit` 捕获系统音频（面试官）→ 48kHz 降采样到 16kHz
+- `AVAudioEngine` 捕获麦克风（自己）→ AVAudioConverter 转 16kHz mono
+- 两路音频各自缓冲 3 秒后发送
 
-### 3.4 WebSocket 客户端
-- **文件**: `mimi-app/Sources/MimiApp/WebSocketClient.swift`
-- 连接 `ws://localhost:8765`，发送音频，接收两种消息类型
+### 3.4 WebSocket 客户端 ✅
+- **文件**: `mimi-app/MimiApp/WebSocketClient.swift`
+- URLSessionWebSocketTask 连接 `ws://127.0.0.1:8765/ws`
+- 发送：binary（音频）+ string（JSON 控制命令）
+- 接收：translation / suggestion 消息 → 通过回调更新 AppState
+- 指数退避自动重连（最多 10 次）
 
-### 3.5 端到端测试
-- 播放 YouTube 面试视频 → 翻译区实时字幕 + 提示区答案建议
+### 3.5 端到端测试 ✅
+- 播放 YouTube 面试视频 → 翻译区实时字幕 + 提示区答案建议 → 已验证
 
 ---
 
-## 阶段 4：打磨
+## 阶段 4：打磨 🔧
 
+- [ ] 修复 Info.plist 警告（Xcode Copy Bundle Resources 重复）
+- [ ] 修复 WebSocket 断连后重连稳定性
+- [ ] 麦克风权限未弹窗（需确认 Info.plist 生效）
 - [ ] 快捷键启动/停止录音
 - [ ] 一键启动脚本（Python 后端 + Swift 前端）
 - [ ] UI 美化（字体、颜色、动画过渡）
@@ -127,5 +135,5 @@
 | 对话管理 | conversation.py | 分句 + 记录 + 上下文窗口 |
 | RAG | LangChain + ChromaDB | 本地 embedding + 检索 + 提示生成 |
 | 后端 | FastAPI + WebSocket | uvicorn, 异步 |
-| 前端 | Swift + SwiftUI | macOS 原生悬浮窗（待实现） |
+| 前端 | Swift + SwiftUI | MenuBarExtra + NSPanel 悬浮窗 + ScreenCaptureKit + AVAudioEngine |
 | 通信 | WebSocket | binary(音频) + JSON(translation/suggestion) |
