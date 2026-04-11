@@ -92,7 +92,7 @@ struct OverlayWindowContent: View {
 // MARK: - Translation Row
 
 struct TranslationRow: View {
-    let entry: TranslationEntry
+    @Bindable var entry: TranslationEntry
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -105,12 +105,18 @@ struct TranslationRow: View {
                     .font(.caption2)
                     .foregroundColor(.gray)
             }
-            Text(entry.original)
+            // 英文原文：partial 时半透明（Phase B 用），final 时正常亮度
+            Text(entry.original + (entry.isTranscriptFinal ? "" : " ▎"))
                 .font(.system(size: 13))
-                .foregroundColor(.white.opacity(0.9))
-            Text(entry.translation)
-                .font(.system(size: 13))
-                .foregroundColor(.yellow.opacity(0.9))
+                .foregroundColor(.white.opacity(entry.isTranscriptFinal ? 0.9 : 0.5))
+                .animation(.easeInOut(duration: 0.15), value: entry.isTranscriptFinal)
+            // 中文翻译：流式过程中末尾加光标 + 略浅，完成后切到正常亮度
+            if !entry.translation.isEmpty || entry.isTranscriptFinal {
+                Text(entry.translation + (entry.isTranslationComplete ? "" : " ▎"))
+                    .font(.system(size: 13))
+                    .foregroundColor(.yellow.opacity(entry.isTranslationComplete ? 0.9 : 0.6))
+                    .animation(.easeInOut(duration: 0.15), value: entry.isTranslationComplete)
+            }
         }
     }
 }

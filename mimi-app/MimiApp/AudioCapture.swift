@@ -8,7 +8,9 @@ class AudioCaptureManager {
     var onAudioChunk: (@MainActor (Data, String) -> Void)?
 
     private let targetSampleRate: Double = 16000
-    private let chunkDuration: Double = 3.0
+    // 1.0s 对应后端 LocalAgreement-2 流式 STT 的更新周期。
+    // 改这个值时记得同步改 mimi-backend/config.yaml 的 audio.chunk_duration
+    private let chunkDuration: Double = 1.0
 
     private var audioEngine: AVAudioEngine?
     private var micBuffer = Data()

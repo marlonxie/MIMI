@@ -50,5 +50,6 @@ rag:
 audio:
   # 采样率
   sample_rate: 16000
-  # 每次发送的音频块大小（秒）
-  chunk_duration: 3
+  # 每次发送的音频块大小（秒）—— 流式 STT 的更新周期
+  # 1.0s 是 LocalAgreement-2 的标准值，首字延迟 ~2s。前端 AudioCapture.swift 也要同步改
+  chunk_duration: 1.0

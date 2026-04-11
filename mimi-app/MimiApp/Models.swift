@@ -6,13 +6,51 @@ struct ServerMessage: Codable {
     let type: String
 }
 
-struct TranslationMessage: Codable {
+/// 英文识别结果（is_final 区分最终/部分）。Phase A 只发 is_final=true，Phase B 会发 partial。
+struct TranscriptMessage: Codable {
     let type: String
+    let sentenceId: String
     let speaker: String
-    let original: String
     let language: String
-    let translation: String
+    let text: String
+    let isFinal: Bool
     let timestamp: String
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case sentenceId = "sentence_id"
+        case speaker
+        case language
+        case text
+        case isFinal = "is_final"
+        case timestamp
+    }
+}
+
+/// 中文翻译流式 token 增量
+struct TranslationDeltaMessage: Codable {
+    let type: String
+    let sentenceId: String
+    let delta: String
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case sentenceId = "sentence_id"
+        case delta
+    }
+}
+
+/// 中文翻译完成
+struct TranslationFinalMessage: Codable {
+    let type: String
+    let sentenceId: String
+    let text: String
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case sentenceId = "sentence_id"
+        case text
+    }
 }
 
 struct SuggestionMessage: Codable {
@@ -47,12 +85,35 @@ struct ControlMessage: Codable {
 
 // MARK: - App State
 
-struct TranslationEntry: Identifiable {
-    let id = UUID()
+/// 一行字幕。class + @Observable，按 sentenceId 索引，字段可被流式增量更新。
+/// 不显式标 @MainActor — 由调用方（AppState 是 @MainActor）保证只在主线程访问。
+@Observable
+final class TranslationEntry: Identifiable {
+    let id: String              // = sentenceId，用于 ForEach / ScrollViewReader
     let speaker: String
-    let original: String
-    let translation: String
     let timestamp: String
+    var original: String        // 英文，partial 时可能被更新
+    var translation: String     // 中文，translation_delta 追加，translation_final 定型
+    var isTranscriptFinal: Bool // false = partial（半透明）
+    var isTranslationComplete: Bool
+
+    init(
+        sentenceId: String,
+        speaker: String,
+        timestamp: String,
+        original: String,
+        translation: String = "",
+        isTranscriptFinal: Bool = true,
+        isTranslationComplete: Bool = false
+    ) {
+        self.id = sentenceId
+        self.speaker = speaker
+        self.timestamp = timestamp
+        self.original = original
+        self.translation = translation
+        self.isTranscriptFinal = isTranscriptFinal
+        self.isTranslationComplete = isTranslationComplete
+    }
 
     var speakerLabel: String {
         speaker == "interviewer" ? "面试官" : "我"

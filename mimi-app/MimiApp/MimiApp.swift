@@ -158,14 +158,39 @@ class AppState {
             self?.wsClient.sendAudio(data)
         }
 
-        wsClient.onTranslation = { [weak self] msg in
-            let entry = TranslationEntry(
-                speaker: msg.speaker,
-                original: msg.original,
-                translation: msg.translation,
-                timestamp: msg.timestamp
-            )
-            self?.translations.append(entry)
+        wsClient.onTranscript = { [weak self] msg in
+            guard let self else { return }
+            if let existing = self.translations.first(where: { $0.id == msg.sentenceId }) {
+                // 已有 entry（Phase B partial 更新会用到）
+                existing.original = msg.text
+                existing.isTranscriptFinal = msg.isFinal
+            } else {
+                // 新 entry，translation 字段先留空，等 delta 填进来
+                let entry = TranslationEntry(
+                    sentenceId: msg.sentenceId,
+                    speaker: msg.speaker,
+                    timestamp: msg.timestamp,
+                    original: msg.text,
+                    isTranscriptFinal: msg.isFinal
+                )
+                self.translations.append(entry)
+            }
+        }
+
+        wsClient.onTranslationDelta = { [weak self] msg in
+            guard let self else { return }
+            if let entry = self.translations.first(where: { $0.id == msg.sentenceId }) {
+                entry.translation += msg.delta
+            }
+            // 找不到就丢弃 — 正常情况下 transcript 总是先到
+        }
+
+        wsClient.onTranslationFinal = { [weak self] msg in
+            guard let self else { return }
+            if let entry = self.translations.first(where: { $0.id == msg.sentenceId }) {
+                entry.translation = msg.text  // 用完整文本覆盖，避免 delta 拼接误差
+                entry.isTranslationComplete = true
+            }
         }
 
         wsClient.onSuggestion = { [weak self] msg in

@@ -119,6 +119,23 @@ class Translator:
             "source_language": source_language or "auto",
         }
 
+    async def translate_stream(self, text: str, source_language: str = None, context: str = ""):
+        """
+        流式翻译 — 逐 token 产出。yields str delta。
+
+        LCEL chain `prompt | llm | StrOutputParser()` 原生支持 .astream()，
+        每个 chunk 是字符串增量。空文本返回空生成器。
+        """
+        if not text or not text.strip():
+            return
+
+        source_hint = self._get_source_hint(source_language)
+        async for chunk in self.chain.astream({
+            "text": text, "source_hint": source_hint, "context": context or ""
+        }):
+            if chunk:
+                yield chunk
+
     @staticmethod
     def _get_source_hint(source_language: str = None) -> str:
         if source_language:

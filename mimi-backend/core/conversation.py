@@ -147,17 +147,19 @@ class ConversationManager:
 
         return str(filepath)
 
-    def _create_entry(self, speaker: str, text: str, language: str) -> dict:
+    def current_timestamp(self) -> str:
+        """返回 hh:mm:ss 格式的当前会话时长，用于 partial transcript 的 timestamp 字段"""
         elapsed = time.time() - self.start_time
         minutes, seconds = divmod(int(elapsed), 60)
         hours, minutes = divmod(minutes, 60)
-        timestamp = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
+    def _create_entry(self, speaker: str, text: str, language: str) -> dict:
         return {
             "speaker": speaker,
             "text": text,
             "language": language,
-            "timestamp": timestamp,
+            "timestamp": self.current_timestamp(),
         }
 
     def _flush_pending(self) -> dict:

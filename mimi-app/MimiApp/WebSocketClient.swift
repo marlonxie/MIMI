@@ -4,7 +4,9 @@ import Foundation
 @Observable
 class WebSocketClient {
     var isConnected = false
-    var onTranslation: (@MainActor (TranslationMessage) -> Void)?
+    var onTranscript: (@MainActor (TranscriptMessage) -> Void)?
+    var onTranslationDelta: (@MainActor (TranslationDeltaMessage) -> Void)?
+    var onTranslationFinal: (@MainActor (TranslationFinalMessage) -> Void)?
     var onSuggestion: (@MainActor (SuggestionMessage) -> Void)?
 
     private var webSocket: URLSessionWebSocketTask?
@@ -95,9 +97,17 @@ class WebSocketClient {
         guard let base = try? JSONDecoder().decode(ServerMessage.self, from: data) else { return }
 
         switch base.type {
-        case "translation":
-            if let msg = try? JSONDecoder().decode(TranslationMessage.self, from: data) {
-                onTranslation?(msg)
+        case "transcript":
+            if let msg = try? JSONDecoder().decode(TranscriptMessage.self, from: data) {
+                onTranscript?(msg)
+            }
+        case "translation_delta":
+            if let msg = try? JSONDecoder().decode(TranslationDeltaMessage.self, from: data) {
+                onTranslationDelta?(msg)
+            }
+        case "translation_final":
+            if let msg = try? JSONDecoder().decode(TranslationFinalMessage.self, from: data) {
+                onTranslationFinal?(msg)
             }
         case "suggestion":
             if let msg = try? JSONDecoder().decode(SuggestionMessage.self, from: data) {

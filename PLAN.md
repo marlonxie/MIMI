@@ -14,6 +14,7 @@
 | 阶段 2：对话管理 + RAG 问答 | ✅ 完成 | 对话管理器 + 文档索引 + RAG 提示生成 |
 | 阶段 3：Swift 前端 | ✅ 完成 | MenuBarExtra + NSPanel 悬浮窗 + ScreenCaptureKit + AVAudioEngine |
 | 阶段 4：打磨 | 🔧 进行中 | WebSocket 断连修复、Info.plist 配置、UI 优化 |
+| 阶段 5：流式字幕重构 | ✅ 完成 | mlx-whisper GPU+ANE + LocalAgreement-2 + 翻译流式 + 解耦中英文 |
 
 ---
 
@@ -126,14 +127,49 @@
 
 ---
 
+## 阶段 5：流式字幕重构 ✅
+
+> 起因：原方案 3s chunk + 等句子完成 + 等翻译完成才一起出，首字延迟 5–10s，且 Whisper 在 chunk 边界乱加标点导致句子被错切
+
+### 5.1 解耦中英文 + 翻译流式 ✅
+- **后端**: `core/translator.py` 加 `translate_stream()` 用 `chain.astream()`
+- **后端**: `server.py` 把 `_send_translation` 重写为 `_send_transcript_and_translate`：先推 transcript（立即），再流式推 translation_delta，最后推 translation_final
+- **前端**: `Models.swift` `TranslationEntry` 从 struct 改成 `@Observable class`，按 `sentenceId` 索引；新 3 类消息 `TranscriptMessage` / `TranslationDeltaMessage` / `TranslationFinalMessage`
+- **前端**: `MimiApp.swift` AppState 三个新回调按 ID 查/创建/更新 entry，delta 追加，final 用完整文本覆盖防拼接误差
+- **前端**: `OverlayWindow.swift` `TranslationRow` 改 `@Bindable`，partial 半透明 + 末尾光标 ▎，完成后淡入定型
+
+### 5.2 STT 真正流式（LocalAgreement-2 + GPU/ANE）✅
+- **Benchmark**: `scripts/bench_whisper.py` 对比 openai/whisper CPU vs mlx-whisper Metal vs faster-whisper CPU。结果 mlx-whisper 比 openai 快 6.6×，比 faster-whisper 快 4.5×
+- **STT 后端**: `core/stt.py` 切到 mlx-whisper（**fp16** 模型，q4 量化版幻觉太多）+ `condition_on_previous_text=False`
+- **流式包装**: `core/stt_stream.py` 新文件 ~200 行实现 LocalAgreement-2：
+  - 维护累积音频缓冲（≤25s 安全阀）
+  - 每次 feed 在整个 buffer 上重新跑 Whisper
+  - LCP 算法对比两次 hypothesis 的最长公共前缀（词级，规范化后比较）
+  - 提交稳定前缀，截掉对应音频，剩余作 tentative
+  - **重复幻觉过滤**：连续 >4 次同一个词触发截断，砍掉 "the the the" / "woo woo" 类幻觉
+- **server.py 接入**: 每个 speaker 独立 `StreamingSTT` 实例 + `current_partial_id`（让 partial → final 在前端原地更新同一行）
+- **chunk 改 1s**: `config.yaml` `audio.chunk_duration: 1.0` + `AudioCapture.swift` `chunkDuration: 1.0`
+- **测试**: `tests/test_stt_stream.py`（流式拼接结果与离线基线 0.91× 字数比例，单元测试 + 集成测试）+ `tests/test_translator_stream.py`（流式 token 产出验证）
+
+### 5.3 性能数据
+| 指标 | 旧 | 新 |
+|---|---|---|
+| Whisper 推理（small, 30s 音频） | 10.21s (CPU) | 1.54s (Metal GPU) |
+| 首字延迟（理论） | 5–10s | ~2s |
+| 中文翻译呈现 | 1.5s 块状一次性 | TTFT ~300ms 后流式 |
+| chunk_duration | 3.0s | 1.0s |
+
+---
+
 ## 技术栈
 
 | 组件 | 技术 | 说明 |
 |------|------|------|
-| STT | Whisper (本地) | openai-whisper, small 模型 |
-| 翻译 | LangChain + Gemini | LCEL chain，带对话上下文，可切换 Claude |
+| STT | mlx-whisper (GPU+ANE) | small fp16 模型，Metal GPU + Apple Neural Engine，6.6× CPU 速度 |
+| 流式 STT | core/stt_stream.py | LocalAgreement-2 算法，1s 更新周期，词级 LCP + 重复幻觉过滤 |
+| 翻译 | LangChain + Gemini | LCEL chain `.astream()`，带对话上下文，可切换 Claude |
 | 对话管理 | conversation.py | 分句 + 记录 + 上下文窗口 |
 | RAG | LangChain + ChromaDB | 本地 embedding + 检索 + 提示生成 |
 | 后端 | FastAPI + WebSocket | uvicorn, 异步 |
 | 前端 | Swift + SwiftUI | MenuBarExtra + NSPanel 悬浮窗 + ScreenCaptureKit + AVAudioEngine |
-| 通信 | WebSocket | binary(音频) + JSON(translation/suggestion) |
+| 通信 | WebSocket | binary(音频) + JSON(transcript/translation_delta/translation_final/suggestion) |
