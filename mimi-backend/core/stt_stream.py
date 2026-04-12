@@ -42,6 +42,8 @@ class StreamingSTT:
 
     MAX_BUFFER_SECONDS = 25.0  # 缓冲区超过这个长度强制提交，避免无限增长
     MIN_BUFFER_SECONDS = 0.5   # 缓冲区不到这个长度就跳过推理
+    SILENCE_THRESHOLD = 0.01   # RMS 低于此值认为是静音（float32 [-1,1]，约 -40dB）
+    SILENCE_FLUSH_SECONDS = 3.0  # 连续静音超过此时长自动 flush buffer
 
     def __init__(self, stt, sample_rate: int = 16000):
         """
@@ -57,6 +59,7 @@ class StreamingSTT:
         # buffer 起点对应的全局时间偏移（每次提交后增长）
         self.buffer_offset: float = 0.0
         self.last_language: str = "unknown"
+        self.silence_duration: float = 0.0  # 连续静音累计时长
 
     def feed(self, audio_chunk: np.ndarray) -> StreamResult:
         """喂入新音频块，返回 (新稳定文本, 当前候选文本)。"""
@@ -64,6 +67,18 @@ class StreamingSTT:
             audio_chunk = audio_chunk.astype(np.float32)
         if len(audio_chunk.shape) > 1:
             audio_chunk = audio_chunk.mean(axis=1)
+
+        # === 静音检测（VAD）— 防止 Whisper 对静音幻觉出 "you" / "." ===
+        rms = float(np.sqrt(np.mean(audio_chunk ** 2)))
+        if rms < self.SILENCE_THRESHOLD:
+            chunk_duration = len(audio_chunk) / self.sample_rate
+            self.silence_duration += chunk_duration
+            # 连续静音超过阈值 → flush buffer 中残留的有声内容
+            if self.silence_duration >= self.SILENCE_FLUSH_SECONDS and len(self.buffer) > 0:
+                result = self.flush()
+                return result
+            return StreamResult(language=self.last_language)
+        self.silence_duration = 0.0
 
         self.buffer = np.concatenate([self.buffer, audio_chunk])
 
@@ -169,6 +184,7 @@ class StreamingSTT:
     def _reset_state(self):
         self.buffer = np.array([], dtype=np.float32)
         self.last_words = []
+        self.silence_duration = 0.0
 
     @staticmethod
     def _flatten_words(segments: list) -> list:

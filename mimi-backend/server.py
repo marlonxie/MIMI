@@ -202,18 +202,19 @@ async def websocket_endpoint(websocket: WebSocket):
                         "timestamp": conversation.current_timestamp(),
                     })
 
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, RuntimeError):
+        # RuntimeError 发生在客户端已断连后再调 receive() / send_json()
+        pass
+    except Exception as e:
+        print(f"WebSocket 错误: {e}")
+        import traceback; traceback.print_exc()
+    finally:
         if suggestion_task and not suggestion_task.done():
             suggestion_task.cancel()
         if conversation.history:
             filepath = conversation.export_transcript()
             print(f"对话记录已保存: {filepath}")
         print("WebSocket 客户端断开连接")
-    except Exception as e:
-        if suggestion_task and not suggestion_task.done():
-            suggestion_task.cancel()
-        print(f"WebSocket 错误: {e}")
-        import traceback; traceback.print_exc()
 
 
 async def _process_confirmed_text(
@@ -257,36 +258,40 @@ async def _send_transcript_and_translate(
     if sentence_id is None:
         sentence_id = str(uuid.uuid4())
 
-    # 1. 立即推送英文（不等翻译）
-    await websocket.send_json({
-        "type": "transcript",
-        "sentence_id": sentence_id,
-        "speaker": sentence["speaker"],
-        "language": sentence["language"],
-        "text": sentence["text"],
-        "is_final": True,
-        "timestamp": sentence["timestamp"],
-    })
-
-    # 2. 流式翻译，逐 chunk 推送
-    context = conversation.get_context_window()
-    full_translation = ""
-    async for delta in translator.translate_stream(
-        sentence["text"], sentence["language"], context=context
-    ):
-        full_translation += delta
+    try:
+        # 1. 立即推送英文（不等翻译）
         await websocket.send_json({
-            "type": "translation_delta",
+            "type": "transcript",
             "sentence_id": sentence_id,
-            "delta": delta,
+            "speaker": sentence["speaker"],
+            "language": sentence["language"],
+            "text": sentence["text"],
+            "is_final": True,
+            "timestamp": sentence["timestamp"],
         })
 
-    # 3. 翻译完成 — 推送完整文本（用于前端定型 + 防止 delta 拼接误差）
-    await websocket.send_json({
-        "type": "translation_final",
-        "sentence_id": sentence_id,
-        "text": full_translation.strip(),
-    })
+        # 2. 流式翻译，逐 chunk 推送
+        context = conversation.get_context_window()
+        full_translation = ""
+        async for delta in translator.translate_stream(
+            sentence["text"], sentence["language"], context=context
+        ):
+            full_translation += delta
+            await websocket.send_json({
+                "type": "translation_delta",
+                "sentence_id": sentence_id,
+                "delta": delta,
+            })
+
+        # 3. 翻译完成 — 推送完整文本（用于前端定型 + 防止 delta 拼接误差）
+        await websocket.send_json({
+            "type": "translation_final",
+            "sentence_id": sentence_id,
+            "text": full_translation.strip(),
+        })
+    except (WebSocketDisconnect, RuntimeError, Exception) as e:
+        # 客户端在推 token 过程中断连 — 静默中止，不传播异常
+        print(f"推送中止（客户端可能已断连）: {type(e).__name__}")
 
 
 async def _debounce_suggestion(
