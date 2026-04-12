@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>MIMI 需要麦克风权限来捕获你的语音并进行实时翻译</string>
 	<key>Privacy - Screen Capture Usage Description</key>
 	<string>MIMI 需要屏幕录制权限来捕获系统音频</string>
 </dict>

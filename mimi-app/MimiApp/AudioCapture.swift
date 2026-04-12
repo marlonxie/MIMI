@@ -23,7 +23,7 @@ class AudioCaptureManager {
 
     func startCapture() async throws {
         isCapturing = true
-        try startMicrophoneCapture()
+        try await startMicrophoneCapture()
         try await startSystemAudioCapture()
     }
 
@@ -35,7 +35,18 @@ class AudioCaptureManager {
 
     // MARK: - Microphone
 
-    private func startMicrophoneCapture() throws {
+    private func startMicrophoneCapture() async throws {
+        // macOS 必须主动请求麦克风权限才会弹系统弹窗（仅 Info.plist key 不够）
+        let granted = await withCheckedContinuation { continuation in
+            AVAudioApplication.requestRecordPermission { granted in
+                continuation.resume(returning: granted)
+            }
+        }
+        guard granted else {
+            print("麦克风权限被拒绝")
+            return
+        }
+
         audioEngine = AVAudioEngine()
         guard let engine = audioEngine else { return }
 
