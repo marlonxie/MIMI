@@ -33,6 +33,11 @@ mimi-backend/transcripts/
 .vscode/
 .idea/
 
+# Claude Code
+CLAUDE.md
+PLAN.md
+.claude/
+
 # Audio test files (large)
 *.wav
 *.mp3

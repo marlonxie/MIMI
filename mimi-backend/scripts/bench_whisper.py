@@ -5,7 +5,7 @@
 
 跑法：
     cd mimi-backend
-    /Users/marlon/anaconda3/envs/mimi/bin/python scripts/bench_whisper.py
+    python scripts/bench_whisper.py
 """
 
 import time
