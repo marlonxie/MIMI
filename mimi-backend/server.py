@@ -157,8 +157,9 @@ async def websocket_endpoint(websocket: WebSocket):
                     continue
 
                 # 路由到对应 speaker 的 StreamingSTT
+                # to_thread: Whisper 推理（CPU/GPU 密集）在线程池跑，不阻塞事件循环
                 stream = get_stream(source)
-                result = stream.feed(audio_data)
+                result = await asyncio.to_thread(stream.feed, audio_data)
 
                 # === 处理 confirmed (LocalAgreement-2 已稳定) 文本 ===
                 triggered_sentences = []
@@ -236,8 +237,11 @@ async def _process_confirmed_text(
     for sentence in completed:
         # 用 current_partial_id 作为这句的 final ID（让前端原地把 partial 行替换为 final）
         sentence_id = current_partial_ids.pop(speaker, None) or str(uuid.uuid4())
-        await _send_transcript_and_translate(
-            websocket, sentence, conversation, sentence_id=sentence_id
+        # create_task: 翻译在后台协程跑（Gemini API ~1.5s），不阻塞主循环处理下一个 chunk
+        asyncio.create_task(
+            _send_transcript_and_translate(
+                websocket, sentence, conversation, sentence_id=sentence_id
+            )
         )
     return completed
 
