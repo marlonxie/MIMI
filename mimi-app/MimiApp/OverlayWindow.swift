@@ -131,19 +131,23 @@ struct TranslationRow: View {
                     Text(entry.original + (entry.isTranscriptFinal ? "" : " ▎"))
                         .font(.system(size: 13))
                         .foregroundColor(.white.opacity(entry.isTranscriptFinal ? 0.9 : 0.5))
+                        .textSelection(.enabled)
                     Text(entry.translation)
                         .font(.system(size: 13))
                         .foregroundColor(.yellow.opacity(entry.isTranslationComplete ? 0.9 : 0.6))
+                        .textSelection(.enabled)
                 }
             } else {
                 // 长句换行显示
                 Text(entry.original + (entry.isTranscriptFinal ? "" : " ▎"))
                     .font(.system(size: 13))
                     .foregroundColor(.white.opacity(entry.isTranscriptFinal ? 0.9 : 0.5))
+                    .textSelection(.enabled)
                 if !entry.translation.isEmpty || entry.isTranscriptFinal {
                     Text(entry.translation + (entry.isTranslationComplete ? "" : " ▎"))
                         .font(.system(size: 13))
                         .foregroundColor(.yellow.opacity(entry.isTranslationComplete ? 0.9 : 0.6))
+                        .textSelection(.enabled)
                 }
             }
         }
