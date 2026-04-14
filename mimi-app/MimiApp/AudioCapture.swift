@@ -23,7 +23,12 @@ class AudioCaptureManager {
 
     func startCapture() async throws {
         isCapturing = true
-        try await startMicrophoneCapture()
+        // 麦克风和系统音频独立启动，一路失败不影响另一路
+        do {
+            try await startMicrophoneCapture()
+        } catch {
+            print("麦克风启动失败（系统音频不受影响）: \(error)")
+        }
         try await startSystemAudioCapture()
     }
 
