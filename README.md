@@ -13,30 +13,37 @@ Real-time interview assistant for Mandarin speakers doing English/German intervi
 ## Architecture
 
 ```
-Swift App (SwiftUI)  ──WebSocket──→  Python Backend (FastAPI)
-│                                         │
-├─ ScreenCaptureKit (system audio)   ├─ stt_stream.py (LocalAgreement-2)
-├─ AVAudioEngine (microphone)        ├─ stt.py (mlx-whisper, Metal GPU)
-└─ NSPanel (floating overlay)        ├─ translator.py (Gemini/Claude, streaming)
-                                     ├─ conversation.py (sentence segmentation)
-                                     └─ rag/ (LangChain + ChromaDB)
+Swift App (SwiftUI)  ──WebSocket (binary: source prefix + PCM)──→  Python Backend (FastAPI)
+│                                                                       │
+├─ ScreenCaptureKit (system audio, 0x00)          AudioSource ("interviewer")  AudioSource ("me")
+├─ AVAudioEngine (microphone, 0x01)               ├─ StreamingSTT             ├─ StreamingSTT
+└─ NSPanel (floating overlay)                     ├─ SentenceSegmenter        ├─ SentenceSegmenter
+                                                  └─ partial_id              └─ partial_id
+                                                          ↓                          ↓
+                                                    SharedHistory (shared conversation record)
+                                                          ↓
+                                               translator.py    rag/engine.py
+                                               (Gemini/Claude)  (LangChain+ChromaDB)
 ```
 
-**Frontend**: Native macOS app in Swift/SwiftUI. Captures audio in 1s PCM chunks, sends over WebSocket, renders streaming subtitles with partial/final states.
+**Frontend**: Native macOS app in Swift/SwiftUI. Captures system audio and microphone independently in 1s PCM chunks (each tagged with a 1-byte source prefix), sends over WebSocket, renders streaming subtitles with partial/final states.
 
-**Backend**: Python FastAPI WebSocket server. Each audio chunk feeds into a cumulative buffer; Whisper runs on the full buffer each time, and LocalAgreement-2 extracts stable words by comparing consecutive inferences. Stable text flows through sentence segmentation → LLM translation (streamed) → optional RAG suggestion.
+**Backend**: Python FastAPI WebSocket server. Each audio source (interviewer/microphone) has an independent `AudioSource` pipeline running in its own coroutine. Audio chunks feed into a cumulative buffer; Whisper (mlx-whisper on Metal GPU) runs on the full buffer each time, and LocalAgreement-2 extracts stable words by comparing consecutive inferences. Stable text flows through per-speaker sentence segmentation → shared history → LLM translation (streamed) → optional RAG suggestion.
 
 ## Tech Stack
 
 | Layer | Tech |
 |-------|------|
 | Audio capture | ScreenCaptureKit + AVAudioEngine |
+| Audio pipeline | AudioSource (per-speaker: StreamingSTT + SentenceSegmenter) |
 | Speech-to-text | mlx-whisper (Apple Silicon Metal GPU + ANE) |
 | Streaming STT | LocalAgreement-2 (consecutive-inference LCP) |
+| Speaker ID | source-based (system audio → interviewer, mic → me) |
+| Conversation | SharedHistory (shared) + SentenceSegmenter (per-speaker) |
 | Translation | LangChain LCEL → Gemini Flash / Claude Sonnet |
 | RAG | LangChain + ChromaDB + all-MiniLM-L6-v2 |
 | Frontend | SwiftUI + NSPanel overlay |
-| Transport | WebSocket (JSON messages) |
+| Transport | WebSocket (binary audio + JSON messages) |
 
 ## Requirements
 
