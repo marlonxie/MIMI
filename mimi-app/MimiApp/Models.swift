@@ -15,6 +15,7 @@ struct TranscriptMessage: Codable {
     let text: String
     let isFinal: Bool
     let timestamp: String
+    let insertAfter: String?  // 多句拆分时，告诉前端插到哪个 ID 后面
 
     enum CodingKeys: String, CodingKey {
         case type
@@ -24,6 +25,7 @@ struct TranscriptMessage: Codable {
         case text
         case isFinal = "is_final"
         case timestamp
+        case insertAfter = "insert_after"
     }
 }
 

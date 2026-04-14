@@ -52,9 +52,12 @@ class WebSocketClient {
         sendJSON(ConfigMessage(source: source))
     }
 
-    func sendAudio(_ data: Data) {
+    /// 发送音频数据，source 嵌入消息本身（前 1 字节：0x00=interviewer, 0x01=me）
+    func sendAudio(_ data: Data, source: String) {
         guard isConnected else { return }
-        webSocket?.send(.data(data)) { @Sendable error in
+        var payload = Data([source == "me" ? 0x01 : 0x00])
+        payload.append(data)
+        webSocket?.send(.data(payload)) { @Sendable error in
             if let error { print("音频发送失败: \(error)") }
         }
     }

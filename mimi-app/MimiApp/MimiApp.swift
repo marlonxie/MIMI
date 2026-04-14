@@ -154,18 +154,18 @@ class AppState {
 
     private func setupCallbacks() {
         audioCapture.onAudioChunk = { [weak self] data, source in
-            self?.wsClient.sendConfig(source: source)
-            self?.wsClient.sendAudio(data)
+            // source 嵌入音频消息本身（前缀字节），不再用 sendConfig 切换
+            self?.wsClient.sendAudio(data, source: source)
         }
 
         wsClient.onTranscript = { [weak self] msg in
             guard let self else { return }
             if let existing = self.translations.first(where: { $0.id == msg.sentenceId }) {
-                // 已有 entry（Phase B partial 更新会用到）
+                // 已有 entry — 原地更新（partial → final，或 partial 文字变化）
                 existing.original = msg.text
                 existing.isTranscriptFinal = msg.isFinal
             } else {
-                // 新 entry，translation 字段先留空，等 delta 填进来
+                // 新 entry
                 let entry = TranslationEntry(
                     sentenceId: msg.sentenceId,
                     speaker: msg.speaker,
@@ -173,7 +173,13 @@ class AppState {
                     original: msg.text,
                     isTranscriptFinal: msg.isFinal
                 )
-                self.translations.append(entry)
+                // insert_after: 多句拆分时，插入到指定 ID 后面（保持阅读顺序）
+                if let afterId = msg.insertAfter,
+                   let idx = self.translations.firstIndex(where: { $0.id == afterId }) {
+                    self.translations.insert(entry, at: idx + 1)
+                } else {
+                    self.translations.append(entry)
+                }
             }
         }
 

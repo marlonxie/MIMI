@@ -125,7 +125,22 @@ def test_lcp_normalization():
     print("LCP 规范化测试通过 ✓")
 
 
+def test_low_energy_noise_rejected():
+    """RMS=0.02 的低能量噪音（低于阈值 0.03）应被静音检测拦截"""
+    stt = SpeechToText()
+    stt.load_model()
+    stream = StreamingSTT(stt, sample_rate=16000)
+
+    noise = np.random.randn(16000).astype(np.float32) * 0.02  # RMS ≈ 0.02
+    for i in range(10):
+        result = stream.feed(noise)
+        assert not result.confirmed_text, f"chunk {i}: 低能量噪音不应有 confirmed: {result.confirmed_text!r}"
+        assert not result.tentative_text, f"chunk {i}: 低能量噪音不应有 tentative: {result.tentative_text!r}"
+    print("低能量噪音测试通过 ✓")
+
+
 if __name__ == "__main__":
     test_lcp_normalization()
     test_silence_chunk()
+    test_low_energy_noise_rejected()
     test_streaming_pipeline()

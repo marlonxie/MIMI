@@ -90,7 +90,6 @@ async def websocket_endpoint(websocket: WebSocket):
         {"type": "suggestion", ...}          → 回答提示区（debounce 触发）
     """
     await websocket.accept()
-    source = "interviewer"
     sample_rate = config["audio"]["sample_rate"]
     conversation = ConversationManager(
         context_window_size=config.get("conversation", {}).get("context_window_size", 10),
@@ -121,8 +120,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 msg_type = data.get("type")
 
                 if msg_type == "config":
-                    source = data.get("source", source)
-                    await websocket.send_json({"type": "config_ack", "source": source})
+                    await websocket.send_json({"type": "config_ack"})
 
                 elif msg_type == "export":
                     filepath = conversation.export_transcript()
@@ -138,19 +136,34 @@ async def websocket_endpoint(websocket: WebSocket):
                                 final.confirmed_text, final.language,
                                 current_partial_ids,
                             )
+                    # ConversationManager 里可能还有 pending 文本（无句末标点）
                     flushed = conversation.flush()
                     for sentence in flushed:
                         sentence_id = current_partial_ids.pop(sentence["speaker"], None) or str(uuid.uuid4())
-                        await _send_transcript_and_translate(
-                            websocket, sentence, conversation, sentence_id=sentence_id
+                        # 同步推 final + 后台翻译（和主循环一致）
+                        await websocket.send_json({
+                            "type": "transcript",
+                            "sentence_id": sentence_id,
+                            "speaker": sentence["speaker"],
+                            "language": sentence["language"],
+                            "text": sentence["text"],
+                            "is_final": True,
+                            "timestamp": sentence["timestamp"],
+                        })
+                        asyncio.create_task(
+                            _stream_translation(websocket, sentence, conversation, sentence_id)
                         )
 
                 continue
 
-            # 处理二进制消息（音频数据）
+            # 处理二进制消息（音频数据，前 1 字节 = source 标记）
             if "bytes" in message:
-                audio_bytes = message["bytes"]
-                audio_data = np.frombuffer(audio_bytes, dtype=np.float32)
+                raw = message["bytes"]
+                if len(raw) < 2:
+                    continue
+                # 前 1 字节：0x00 = interviewer, 0x01 = me
+                source = "me" if raw[0] == 0x01 else "interviewer"
+                audio_data = np.frombuffer(raw[1:], dtype=np.float32)
 
                 # 跳过太短的音频
                 if len(audio_data) < sample_rate * 0.3:
@@ -226,45 +239,32 @@ async def _process_confirmed_text(
     language: str,
     current_partial_ids: dict,
 ) -> list[dict]:
-    """把 StreamingSTT 提交的稳定文本喂给 ConversationManager 分句，并对完成的句子触发 final transcript + 流式翻译。
+    """把 StreamingSTT 提交的稳定文本喂给 ConversationManager 分句。
 
-    返回触发的 completed sentences（用于 RAG suggestion）。
+    对完成的句子：同步推 final transcript（保证在下一个 partial 之前到达前端），
+    翻译扔后台 create_task。
+
+    如果 confirmed 文本进了 pending（无句末标点），不 pop partial_id，
+    灰色行继续用同一个 ID 更新。
     """
     completed = conversation.add_transcription(
         {"text": confirmed_text, "language": language, "segments": []},
         speaker=speaker,
     )
-    for sentence in completed:
-        # 用 current_partial_id 作为这句的 final ID（让前端原地把 partial 行替换为 final）
-        sentence_id = current_partial_ids.pop(speaker, None) or str(uuid.uuid4())
-        # create_task: 翻译在后台协程跑（Gemini API ~1.5s），不阻塞主循环处理下一个 chunk
-        asyncio.create_task(
-            _send_transcript_and_translate(
-                websocket, sentence, conversation, sentence_id=sentence_id
-            )
-        )
-    return completed
 
+    if not completed:
+        # confirmed 进了 ConversationManager 的 pending（没有句末标点）
+        # 不 pop partial_id！灰色行继续用同一个 ID
+        return []
 
-async def _send_transcript_and_translate(
-    websocket: WebSocket,
-    sentence: dict,
-    conversation: ConversationManager,
-    sentence_id: str | None = None,
-):
-    """先推 transcript（英文，立即），再流式推 translation_delta，最后推 translation_final。
+    # 有完成的句子 → pop partial_id，同步推 final
+    prev_id = current_partial_ids.pop(speaker, None) or str(uuid.uuid4())
+    for i, sentence in enumerate(completed):
+        sentence_id = prev_id if i == 0 else str(uuid.uuid4())
+        insert_after = prev_id if i > 0 else None
 
-    这样英文不再被翻译延迟拖累，中文以打字机方式逐 chunk 出现。
-
-    sentence_id：可选，传入一个已存在的 ID 让前端原地把 partial 行替换为 final。
-    不传则生成新 ID。
-    """
-    if sentence_id is None:
-        sentence_id = str(uuid.uuid4())
-
-    try:
-        # 1. 立即推送英文（不等翻译）
-        await websocket.send_json({
+        # final transcript 同步推（保证在下一个 partial 之前到达前端）
+        msg = {
             "type": "transcript",
             "sentence_id": sentence_id,
             "speaker": sentence["speaker"],
@@ -272,9 +272,27 @@ async def _send_transcript_and_translate(
             "text": sentence["text"],
             "is_final": True,
             "timestamp": sentence["timestamp"],
-        })
+        }
+        if insert_after is not None:
+            msg["insert_after"] = insert_after
+        await websocket.send_json(msg)
 
-        # 2. 流式翻译，逐 chunk 推送
+        # 翻译扔后台（不阻塞下一个 chunk 的处理）
+        asyncio.create_task(
+            _stream_translation(websocket, sentence, conversation, sentence_id)
+        )
+        prev_id = sentence_id
+    return completed
+
+
+async def _stream_translation(
+    websocket: WebSocket,
+    sentence: dict,
+    conversation: ConversationManager,
+    sentence_id: str,
+):
+    """后台协程：流式推翻译 delta + final。从旧 _send_transcript_and_translate 拆出。"""
+    try:
         context = conversation.get_context_window()
         full_translation = ""
         async for delta in translator.translate_stream(
@@ -287,15 +305,13 @@ async def _send_transcript_and_translate(
                 "delta": delta,
             })
 
-        # 3. 翻译完成 — 推送完整文本（用于前端定型 + 防止 delta 拼接误差）
         await websocket.send_json({
             "type": "translation_final",
             "sentence_id": sentence_id,
             "text": full_translation.strip(),
         })
-    except (WebSocketDisconnect, RuntimeError, Exception) as e:
-        # 客户端在推 token 过程中断连 — 静默中止，不传播异常
-        print(f"推送中止（客户端可能已断连）: {type(e).__name__}")
+    except Exception as e:
+        print(f"翻译推送中止: {type(e).__name__}")
 
 
 async def _debounce_suggestion(
