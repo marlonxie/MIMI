@@ -1,4 +1,8 @@
-"""对话管理器 — 分句、对话记录、上下文窗口、触发检测"""
+"""对话管理 — SharedHistory（共享对话记录）+ SentenceSegmenter（per-speaker 分句器）
+
+拆分原因：两路音频（系统音频 + 麦克风）并发处理时，pending 状态必须独立，
+但 history 需要共享（翻译 context 要看双方对话）。
+"""
 
 import json
 import time
@@ -6,110 +10,43 @@ from datetime import datetime
 from pathlib import Path
 
 
-class ConversationManager:
-    """管理面试对话的完整生命周期"""
+class SharedHistory:
+    """共享的对话历史。两路音频的 SentenceSegmenter 都往这里写完成的句子。
 
-    SENTENCE_ENDINGS = {'.', '?', '!', '。', '？', '！'}
+    只负责：history 存储、context_window 查询、导出。
+    不持有 pending 状态（那是 SentenceSegmenter 的事）。
+    """
 
     def __init__(self, context_window_size: int = 10, export_path: str = "./transcripts"):
         self.context_window_size = context_window_size
         self.export_path = Path(export_path)
-        self.history: list[dict] = []  # 完整对话记录
-        self.pending_text = ""  # 未完成的句子碎片
-        self.pending_speaker = None
-        self.pending_language = None
-        self.pending_start_time = None
+        self.history: list[dict] = []  # 双路交织的完整对话记录
         self.start_time = time.time()
 
-    def add_transcription(self, stt_result: dict, speaker: str) -> list[dict]:
-        """
-        接收 STT 结果，返回已完成的句子列表。
-
-        利用 Whisper segments 的标点判断句子是否完整：
-        - 以 .?! 结尾 → 完整，输出
-        - 否则 → 暂存到 pending_text，等下一个 chunk
-
-        Args:
-            stt_result: {"text": str, "language": str, "segments": [...]}
-            speaker: "interviewer" 或 "me"
-
-        Returns:
-            完成的句子列表 [{"speaker", "text", "language", "timestamp"}]
-        """
-        text = stt_result.get("text", "").strip()
-        language = stt_result.get("language", "unknown")
-
-        if not text:
-            return []
-
-        completed = []
-
-        # 如果 speaker 变了，先把 pending 强制输出
-        if self.pending_text and self.pending_speaker != speaker:
-            completed.append(self._flush_pending())
-
-        # 处理当前文本
-        if self.pending_text:
-            text = self.pending_text + " " + text
-            self.pending_text = ""
-        else:
-            self.pending_start_time = time.time()
-
-        # 按句子边界切分
-        current_sentence = ""
-        for char in text:
-            current_sentence += char
-            if char in self.SENTENCE_ENDINGS:
-                sentence = current_sentence.strip()
-                if sentence:
-                    entry = self._create_entry(speaker, sentence, language)
-                    self.history.append(entry)
-                    completed.append(entry)
-                current_sentence = ""
-
-        # 剩余部分存入 pending
-        remaining = current_sentence.strip()
-        if remaining:
-            # 安全阀：pending 超过 15 秒强制输出
-            if (self.pending_start_time and
-                    time.time() - self.pending_start_time > 15):
-                entry = self._create_entry(speaker, remaining, language)
-                self.history.append(entry)
-                completed.append(entry)
-                self.pending_text = ""
-                self.pending_start_time = None
-            else:
-                self.pending_text = remaining
-                self.pending_speaker = speaker
-                self.pending_language = language
-                if self.pending_start_time is None:
-                    self.pending_start_time = time.time()
-
-        return completed
-
-    def flush(self) -> list[dict]:
-        """强制输出所有 pending 文本（面试结束时调用）"""
-        if self.pending_text:
-            return [self._flush_pending()]
-        return []
+    def add_sentence(self, speaker: str, text: str, language: str) -> dict:
+        """添加一个完成的句子到 history。返回 entry dict。"""
+        entry = {
+            "speaker": speaker,
+            "text": text,
+            "language": language,
+            "timestamp": self.current_timestamp(),
+        }
+        self.history.append(entry)
+        return entry
 
     def get_context_window(self, n: int = None) -> str:
-        """
-        返回最近 n 句对话，格式化为 LLM 可读的上下文。
+        """返回最近 n 句对话，格式化为 LLM 可读的上下文。
 
         Returns:
-            "[Interviewer] Tell me about your ML experience.\n[Me] I worked on..."
+            "[Interviewer] Tell me about your ML experience.\\n[Me] I worked on..."
         """
         if n is None:
             n = self.context_window_size
-
         recent = self.history[-n:] if len(self.history) > n else self.history
-
         lines = []
         for entry in recent:
             label = "Interviewer" if entry["speaker"] == "interviewer" else "Me"
             lines.append(f"[{label}] {entry['text']}")
-
         return "\n".join(lines)
 
     def has_new_interviewer_speech(self, since_index: int) -> bool:
@@ -126,15 +63,21 @@ class ConversationManager:
             if entry["speaker"] == "interviewer":
                 texts.insert(0, entry["text"])
             else:
-                break  # 遇到自己说的就停
+                break
         return " ".join(texts)
+
+    def current_timestamp(self) -> str:
+        """返回 hh:mm:ss 格式的当前会话时长"""
+        elapsed = time.time() - self.start_time
+        minutes, seconds = divmod(int(elapsed), 60)
+        hours, minutes = divmod(minutes, 60)
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
     def export_transcript(self, filename: str = None) -> str:
         """导出完整对话记录到文件"""
         self.export_path.mkdir(parents=True, exist_ok=True)
         if filename is None:
             filename = f"interview_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-
         filepath = self.export_path / filename
         data = {
             "date": datetime.now().isoformat(),
@@ -144,33 +87,83 @@ class ConversationManager:
         }
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-
         return str(filepath)
 
-    def current_timestamp(self) -> str:
-        """返回 hh:mm:ss 格式的当前会话时长，用于 partial transcript 的 timestamp 字段"""
-        elapsed = time.time() - self.start_time
-        minutes, seconds = divmod(int(elapsed), 60)
-        hours, minutes = divmod(minutes, 60)
-        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
-    def _create_entry(self, speaker: str, text: str, language: str) -> dict:
-        return {
-            "speaker": speaker,
-            "text": text,
-            "language": language,
-            "timestamp": self.current_timestamp(),
-        }
+class SentenceSegmenter:
+    """per-speaker 的分句器。持有 pending 缓冲状态，完成的句子写入 SharedHistory。
 
-    def _flush_pending(self) -> dict:
-        entry = self._create_entry(
-            self.pending_speaker or "unknown",
+    每个 AudioSource 持有一个独立的 SentenceSegmenter 实例，
+    两路不会互相覆盖 pending 状态。
+    """
+
+    SENTENCE_ENDINGS = {'.', '?', '!', '。', '？', '！'}
+    PENDING_TIMEOUT = 15.0  # pending 超过此秒数强制输出
+
+    def __init__(self, speaker: str, shared_history: SharedHistory):
+        self.speaker = speaker
+        self.shared_history = shared_history
+        self.pending_text = ""
+        self.pending_language = None
+        self.pending_start_time = None
+
+    def add_text(self, text: str, language: str) -> list[dict]:
+        """接收 confirmed 文本，按标点分句。完成的句子写入 shared_history。
+
+        Returns:
+            完成的句子列表 [{"speaker", "text", "language", "timestamp"}]
+        """
+        text = text.strip()
+        if not text:
+            return []
+
+        completed = []
+
+        # 拼接 pending
+        if self.pending_text:
+            text = self.pending_text + " " + text
+            self.pending_text = ""
+        else:
+            self.pending_start_time = time.time()
+
+        # 按句子边界切分
+        current_sentence = ""
+        for char in text:
+            current_sentence += char
+            if char in self.SENTENCE_ENDINGS:
+                sentence = current_sentence.strip()
+                if sentence:
+                    entry = self.shared_history.add_sentence(self.speaker, sentence, language)
+                    completed.append(entry)
+                current_sentence = ""
+
+        # 剩余部分存入 pending
+        remaining = current_sentence.strip()
+        if remaining:
+            if (self.pending_start_time and
+                    time.time() - self.pending_start_time > self.PENDING_TIMEOUT):
+                entry = self.shared_history.add_sentence(self.speaker, remaining, language)
+                completed.append(entry)
+                self.pending_text = ""
+                self.pending_start_time = None
+            else:
+                self.pending_text = remaining
+                self.pending_language = language
+                if self.pending_start_time is None:
+                    self.pending_start_time = time.time()
+
+        return completed
+
+    def flush(self) -> list[dict]:
+        """强制输出 pending 文本。面试结束 / 停止录音时调用。"""
+        if not self.pending_text:
+            return []
+        entry = self.shared_history.add_sentence(
+            self.speaker,
             self.pending_text,
             self.pending_language or "unknown",
         )
-        self.history.append(entry)
         self.pending_text = ""
-        self.pending_speaker = None
         self.pending_language = None
         self.pending_start_time = None
-        return entry
+        return [entry]

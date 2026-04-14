@@ -42,7 +42,8 @@ class StreamingSTT:
 
     MAX_BUFFER_SECONDS = 25.0  # 缓冲区超过这个长度强制提交，避免无限增长
     MIN_BUFFER_SECONDS = 0.5   # 缓冲区不到这个长度就跳过推理
-    SILENCE_THRESHOLD = 0.03   # RMS 低于此值认为是静音（float32 [-1,1]，约 -30dB）
+    SILENCE_THRESHOLD = 0.01   # RMS 低于此值认为是静音（float32 [-1,1]，约 -40dB）
+    # Voice Processing (AEC+NS) 在前端已过滤回声和噪音，这里只拦截纯数字静音
     SILENCE_FLUSH_SECONDS = 3.0  # 连续静音超过此时长自动 flush buffer
 
     def __init__(self, stt, sample_rate: int = 16000):

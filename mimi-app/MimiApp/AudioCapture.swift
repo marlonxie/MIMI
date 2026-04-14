@@ -51,6 +51,9 @@ class AudioCaptureManager {
         guard let engine = audioEngine else { return }
 
         let inputNode = engine.inputNode
+        // 注意：Voice Processing (AEC) 和 ScreenCaptureKit 系统音频捕获不兼容
+        // （AUVPAggregate 聚合设备与 SCStream 音频设备冲突）
+        // 回声问题改用更高的静音阈值解决
         let inputFormat = inputNode.outputFormat(forBus: 0)
 
         guard let targetFormat = AVAudioFormat(

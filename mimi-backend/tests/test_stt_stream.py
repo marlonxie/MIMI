@@ -131,7 +131,7 @@ def test_low_energy_noise_rejected():
     stt.load_model()
     stream = StreamingSTT(stt, sample_rate=16000)
 
-    noise = np.random.randn(16000).astype(np.float32) * 0.02  # RMS ≈ 0.02
+    noise = np.random.randn(16000).astype(np.float32) * 0.005  # RMS ≈ 0.005 < 0.01 threshold
     for i in range(10):
         result = stream.feed(noise)
         assert not result.confirmed_text, f"chunk {i}: 低能量噪音不应有 confirmed: {result.confirmed_text!r}"

@@ -33,25 +33,36 @@ struct OverlayWindowContent: View {
 
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 6) {
-                        ForEach(appState.translations) { entry in
-                            TranslationRow(entry: entry)
+                    LazyVStack(alignment: .leading, spacing: 4) {
+                        ForEach(Array(appState.translations.enumerated()), id: \.element.id) { index, entry in
+                            let prevSpeaker = index > 0 ? appState.translations[index - 1].speaker : nil
+                            let showSpeaker = entry.speaker != prevSpeaker
+
+                            TranslationRow(entry: entry, showSpeaker: showSpeaker)
                                 .id(entry.id)
+                                .padding(.top, showSpeaker && index > 0 ? 12 : 0)
                         }
                     }
                     .padding(.horizontal, 12)
                     .padding(.bottom, 8)
                 }
                 .onChange(of: appState.translations.count) {
-                    if let last = appState.translations.last {
-                        withAnimation {
-                            proxy.scrollTo(last.id, anchor: .bottom)
-                        }
-                    }
+                    scrollToBottom(proxy)
+                }
+                .onChange(of: appState.translations.last?.original) {
+                    scrollToBottom(proxy)
                 }
             }
         }
         .frame(minHeight: 150)
+    }
+
+    private func scrollToBottom(_ proxy: ScrollViewProxy) {
+        if let last = appState.translations.last {
+            withAnimation(.easeOut(duration: 0.15)) {
+                proxy.scrollTo(last.id, anchor: .bottom)
+            }
+        }
     }
 
     // MARK: - 提示区
@@ -93,29 +104,47 @@ struct OverlayWindowContent: View {
 
 struct TranslationRow: View {
     @Bindable var entry: TranslationEntry
+    var showSpeaker: Bool = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 4) {
-                Text(entry.speakerLabel)
-                    .font(.caption2)
-                    .foregroundColor(entry.speaker == "interviewer" ? .cyan : .green)
-                    .fontWeight(.bold)
-                Text(entry.timestamp)
-                    .font(.caption2)
-                    .foregroundColor(.gray)
+            // 说话人标签：只在 speaker 切换时显示
+            if showSpeaker {
+                HStack(spacing: 4) {
+                    Text(entry.speakerLabel)
+                        .font(.caption2)
+                        .foregroundColor(entry.speaker == "interviewer" ? .cyan : .green)
+                        .fontWeight(.bold)
+                    Text(entry.timestamp)
+                        .font(.caption2)
+                        .foregroundColor(.gray)
+                }
             }
-            // 英文原文：partial 时半透明（Phase B 用），final 时正常亮度
-            Text(entry.original + (entry.isTranscriptFinal ? "" : " ▎"))
-                .font(.system(size: 13))
-                .foregroundColor(.white.opacity(entry.isTranscriptFinal ? 0.9 : 0.5))
-                .animation(.easeInOut(duration: 0.15), value: entry.isTranscriptFinal)
-            // 中文翻译：流式过程中末尾加光标 + 略浅，完成后切到正常亮度
-            if !entry.translation.isEmpty || entry.isTranscriptFinal {
-                Text(entry.translation + (entry.isTranslationComplete ? "" : " ▎"))
+
+            // 英文 + 中文：短句同行，长句换行
+            let isShort = entry.original.count + entry.translation.count < 60
+                && !entry.translation.isEmpty
+
+            if isShort {
+                // 短句同行显示
+                HStack(spacing: 8) {
+                    Text(entry.original + (entry.isTranscriptFinal ? "" : " ▎"))
+                        .font(.system(size: 13))
+                        .foregroundColor(.white.opacity(entry.isTranscriptFinal ? 0.9 : 0.5))
+                    Text(entry.translation)
+                        .font(.system(size: 13))
+                        .foregroundColor(.yellow.opacity(entry.isTranslationComplete ? 0.9 : 0.6))
+                }
+            } else {
+                // 长句换行显示
+                Text(entry.original + (entry.isTranscriptFinal ? "" : " ▎"))
                     .font(.system(size: 13))
-                    .foregroundColor(.yellow.opacity(entry.isTranslationComplete ? 0.9 : 0.6))
-                    .animation(.easeInOut(duration: 0.15), value: entry.isTranslationComplete)
+                    .foregroundColor(.white.opacity(entry.isTranscriptFinal ? 0.9 : 0.5))
+                if !entry.translation.isEmpty || entry.isTranscriptFinal {
+                    Text(entry.translation + (entry.isTranslationComplete ? "" : " ▎"))
+                        .font(.system(size: 13))
+                        .foregroundColor(.yellow.opacity(entry.isTranslationComplete ? 0.9 : 0.6))
+                }
             }
         }
     }

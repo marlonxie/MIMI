@@ -56,14 +56,14 @@ async def run_test():
 
         recv_task = asyncio.create_task(receiver())
 
-        # 逐块发送音频，模拟实时
+        # 逐块发送音频，模拟实时（双路并发：interviewer + me 同时发）
         for i in range(0, len(audio), chunk_samples):
             chunk = audio[i:i + chunk_samples]
             audio_bytes = chunk.astype(np.float32).tobytes()
-            # 前缀字节 0x00 = interviewer
-            payload = bytes([0x00]) + audio_bytes
-            await ws.send(payload)
-            # 等 1.1s 模拟实时间隔（给后端足够处理时间）
+            # 发 interviewer（系统音频）
+            await ws.send(bytes([0x00]) + audio_bytes)
+            # 同时发 me（麦克风，模拟外放回声——同样的音频内容）
+            await ws.send(bytes([0x01]) + audio_bytes)
             await asyncio.sleep(1.1)
 
         # 发 flush
