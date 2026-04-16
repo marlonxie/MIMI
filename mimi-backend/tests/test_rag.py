@@ -257,7 +257,7 @@ def test_rag_suggestion():
 
 def test_translator_with_context():
     """测试：带上下文的翻译"""
-    from core.translator import Translator
+    from translation.langchain_translator import Translator
 
     translator = Translator()
 
@@ -280,7 +280,7 @@ def test_translator_with_context():
 
 def test_translator_empty_context():
     """测试：空上下文翻译"""
-    from core.translator import Translator
+    from translation.langchain_translator import Translator
 
     translator = Translator()
     result = translator.translate("Hello.", source_language="en", context="")

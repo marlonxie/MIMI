@@ -4,8 +4,8 @@ import asyncio
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from core.translator import Translator
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+from translation.langchain_translator import Translator
 
 
 def test_translate_english():

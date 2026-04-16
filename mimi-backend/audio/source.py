@@ -1,0 +1,184 @@
+"""AudioSource — 每个音频源（系统音频 / 麦克风）的独立处理管道。
+
+两路音频各自一个实例，状态完全独立：
+- self.stream: StreamingSTT（独立 buffer / LocalAgreement-2）
+- self.segmenter: SentenceSegmenter（独立 pending 缓冲）
+- self.partial_id: 当前灰色行的 UUID
+
+speaker 字段是简化的说话人识别（系统音频→interviewer，麦克风→me），
+真正的 diarization 作为独立模块叠加（见 audio/speaker_id.py）。
+"""
+
+import asyncio
+import uuid
+import numpy as np
+from fastapi import WebSocket
+
+from audio.streaming import StreamingSTT
+from conversation.history import SharedHistory
+from conversation.segmenter import SentenceSegmenter
+
+
+class AudioSource:
+    """每个音频源的完整处理管道：STT → 分句 → 推送。"""
+
+    def __init__(
+        self,
+        speaker: str,
+        websocket: WebSocket,
+        stt_engine,  # 符合 STT 接口：load_model() + transcribe_audio(audio) -> dict
+        shared_history: SharedHistory,
+        sample_rate: int,
+        whisper_lock: asyncio.Lock,
+        translator,  # 符合 Translator 接口：translate_stream(text, lang, context)
+    ):
+        self.speaker = speaker
+        self.websocket = websocket
+        self.shared_history = shared_history
+        self.stream = StreamingSTT(stt_engine, sample_rate=sample_rate)
+        self.segmenter = SentenceSegmenter(speaker, shared_history)
+        self.partial_id: str | None = None
+        self.last_triggered_sentences: list[dict] = []
+        self._whisper_lock = whisper_lock
+        self._translator = translator
+
+    def pop_partial_id(self) -> str | None:
+        pid = self.partial_id
+        self.partial_id = None
+        return pid
+
+    async def handle_chunk(self, audio_data: np.ndarray):
+        """处理一个音频 chunk：Whisper 推理 → 分句 → final 推送 → partial 推送。
+
+        在独立协程里跑（create_task），self.speaker 不会被其他路覆盖。
+        """
+        # Whisper 推理（GPU 锁保证不和另一路同时跑）
+        async with self._whisper_lock:
+            result = await asyncio.to_thread(self.stream.feed, audio_data)
+
+        # === confirmed 文本 → 分句 → final 推送 ===
+        if result.confirmed_text:
+            # 用 add_words 利用词间停顿做自然分句（而非 add_text 只看 .?!）
+            completed = self.segmenter.add_words(result.confirmed_words, result.language)
+            if completed:
+                prev_id = self.pop_partial_id() or str(uuid.uuid4())
+                for i, sentence in enumerate(completed):
+                    sentence_id = prev_id if i == 0 else str(uuid.uuid4())
+                    insert_after = prev_id if i > 0 else None
+
+                    msg = {
+                        "type": "transcript",
+                        "sentence_id": sentence_id,
+                        "speaker": sentence["speaker"],
+                        "language": sentence["language"],
+                        "text": sentence["text"],
+                        "is_final": True,
+                        "timestamp": sentence["timestamp"],
+                    }
+                    if insert_after is not None:
+                        msg["insert_after"] = insert_after
+                    await self.websocket.send_json(msg)
+
+                    asyncio.create_task(
+                        stream_translation(
+                            self.websocket, sentence, self.shared_history,
+                            sentence_id, self._translator,
+                        )
+                    )
+                    prev_id = sentence_id
+                self.last_triggered_sentences = completed
+
+        # === partial 推送（灰色行） ===
+        preview = self.segmenter.pending_text or ""
+        if result.tentative_text:
+            preview = (preview + " " + result.tentative_text).strip() if preview else result.tentative_text
+
+        if preview:
+            if self.partial_id is None:
+                self.partial_id = str(uuid.uuid4())
+            await self.websocket.send_json({
+                "type": "transcript",
+                "sentence_id": self.partial_id,
+                "speaker": self.speaker,
+                "language": result.language,
+                "text": preview,
+                "is_final": False,
+                "timestamp": self.shared_history.current_timestamp(),
+            })
+
+    async def flush(self):
+        """强制提交 StreamingSTT 剩余 buffer + SentenceSegmenter pending。"""
+        # StreamingSTT flush
+        final = self.stream.flush()
+        if final.confirmed_text:
+            completed = self.segmenter.add_words(final.confirmed_words, final.language)
+            if completed:
+                prev_id = self.pop_partial_id() or str(uuid.uuid4())
+                for i, sentence in enumerate(completed):
+                    sentence_id = prev_id if i == 0 else str(uuid.uuid4())
+                    await self.websocket.send_json({
+                        "type": "transcript",
+                        "sentence_id": sentence_id,
+                        "speaker": sentence["speaker"],
+                        "language": sentence["language"],
+                        "text": sentence["text"],
+                        "is_final": True,
+                        "timestamp": sentence["timestamp"],
+                    })
+                    asyncio.create_task(
+                        stream_translation(
+                            self.websocket, sentence, self.shared_history,
+                            sentence_id, self._translator,
+                        )
+                    )
+                    prev_id = sentence_id
+
+        # SentenceSegmenter flush（pending 里可能还有没句末标点的文本）
+        flushed = self.segmenter.flush()
+        for sentence in flushed:
+            sid = self.pop_partial_id() or str(uuid.uuid4())
+            await self.websocket.send_json({
+                "type": "transcript",
+                "sentence_id": sid,
+                "speaker": sentence["speaker"],
+                "language": sentence["language"],
+                "text": sentence["text"],
+                "is_final": True,
+                "timestamp": sentence["timestamp"],
+            })
+            asyncio.create_task(
+                stream_translation(
+                    self.websocket, sentence, self.shared_history,
+                    sid, self._translator,
+                )
+            )
+
+
+async def stream_translation(
+    websocket: WebSocket,
+    sentence: dict,
+    shared_history: SharedHistory,
+    sentence_id: str,
+    translator,
+):
+    """后台协程：流式推翻译 delta + final。"""
+    try:
+        context = shared_history.get_context_window()
+        full_translation = ""
+        async for delta in translator.translate_stream(
+            sentence["text"], sentence["language"], context=context
+        ):
+            full_translation += delta
+            await websocket.send_json({
+                "type": "translation_delta",
+                "sentence_id": sentence_id,
+                "delta": delta,
+            })
+
+        await websocket.send_json({
+            "type": "translation_final",
+            "sentence_id": sentence_id,
+            "text": full_translation.strip(),
+        })
+    except Exception as e:
+        print(f"翻译推送中止: {type(e).__name__}")

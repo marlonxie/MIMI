@@ -42,7 +42,7 @@ async def test_silence():
 
 async def test_real_audio():
     """测试：发送真实音频，验证 translation 消息格式"""
-    test_file = "tests/test_audio.wav"
+    test_file = "tests/test_audio.wav"  # backend-relative path
     try:
         with wave.open(test_file, 'rb') as wf:
             sr = wf.getframerate()

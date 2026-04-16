@@ -16,12 +16,13 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from core.stt import SpeechToText
-from core.stt_stream import StreamingSTT
-from core.conversation import SharedHistory, SentenceSegmenter
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+from audio.stt_mlx import SpeechToText
+from audio.streaming import StreamingSTT
+from conversation.history import SharedHistory
+from conversation.segmenter import SentenceSegmenter
 
-AUDIO_PATH = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).parent / "test_audio.wav"
+AUDIO_PATH = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).parent.parent / "test_audio.wav"
 CHUNK_SECONDS = 1.0
 SENTENCE_ENDINGS = {'.', '?', '!'}
 

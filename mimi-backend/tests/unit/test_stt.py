@@ -4,8 +4,8 @@ import numpy as np
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from core.stt import SpeechToText
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+from audio.stt_mlx import SpeechToText
 
 
 def test_stt_with_silence():
@@ -20,7 +20,7 @@ def test_stt_with_silence():
 
 def test_stt_with_audio_file():
     """测试：用音频文件测试转写（需要提供测试文件）"""
-    test_file = Path(__file__).parent / "test_audio.wav"
+    test_file = Path(__file__).parent.parent / "test_audio.wav"
     if not test_file.exists():
         print(f"跳过：测试音频文件不存在 ({test_file})")
         print("可以放一个英语或德语的 .wav 文件到 tests/test_audio.wav 来测试")

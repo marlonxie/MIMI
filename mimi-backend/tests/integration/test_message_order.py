@@ -24,7 +24,7 @@ except ImportError:
     print("需要 websockets 库: pip install websockets")
     sys.exit(1)
 
-AUDIO_PATH = Path(__file__).parent / "test_audio.wav"
+AUDIO_PATH = Path(__file__).parent.parent / "test_audio.wav"
 WS_URL = "ws://127.0.0.1:8765/ws"
 CHUNK_SECONDS = 1.0
 

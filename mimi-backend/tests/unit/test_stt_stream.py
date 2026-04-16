@@ -12,12 +12,12 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from core.stt import SpeechToText
-from core.stt_stream import StreamingSTT
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+from audio.stt_mlx import SpeechToText
+from audio.streaming import StreamingSTT
 
 
-AUDIO_PATH = Path(__file__).parent / "test_audio.wav"
+AUDIO_PATH = Path(__file__).parent.parent / "test_audio.wav"
 CHUNK_SECONDS = 1.0
 
 
@@ -100,7 +100,7 @@ def test_silence_chunk():
 
 def test_lcp_normalization():
     """单元测试：词汇规范化匹配"""
-    from core.stt_stream import StreamingSTT as S
+    from audio.streaming import StreamingSTT as S
 
     # 标点不同应该被认为相同
     a = [{"word": "Hello,", "start": 0, "end": 0.5}]

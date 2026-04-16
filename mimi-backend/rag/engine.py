@@ -10,7 +10,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
 
-from core.translator import _create_llm
+from translation.langchain_translator import _create_llm
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
