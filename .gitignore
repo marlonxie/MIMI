@@ -43,3 +43,6 @@ PLAN.md
 *.mp3
 *.m4a
 !resources/
+
+# TED diagnostic test outputs (regenerated per run)
+mimi-backend/tests/fixtures/ted_run_*.txt

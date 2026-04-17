@@ -12,8 +12,16 @@ https://github.com/ufal/whisper_streaming
 - 这样既保住了 Whisper 的完整音频上下文（避免幻觉标点），又把首字延迟从 chunk_size 降到 ~2*chunk_size
 """
 
+import os
 import numpy as np
 from dataclasses import dataclass, field
+
+_DEBUG = os.environ.get("MIMI_STREAM_DEBUG", "").strip() not in ("", "0", "false", "False")
+
+
+def _debug(msg: str) -> None:
+    if _DEBUG:
+        print(f"[stream] {msg}", flush=True)
 
 
 @dataclass
@@ -61,6 +69,11 @@ class StreamingSTT:
         self.buffer_offset: float = 0.0
         self.last_language: str = "unknown"
         self.silence_duration: float = 0.0  # 连续静音累计时长
+        # debug only
+        self._real_time: float = 0.0  # 累计喂入音频的真实时长（含跳过的静音）
+        self._vad_skip_count: int = 0
+        self._vad_skip_secs: float = 0.0
+        self._force_commit_count: int = 0
 
     def feed(self, audio_chunk: np.ndarray) -> StreamResult:
         """喂入新音频块，返回 (新稳定文本, 当前候选文本)。"""
@@ -69,16 +82,29 @@ class StreamingSTT:
         if len(audio_chunk.shape) > 1:
             audio_chunk = audio_chunk.mean(axis=1)
 
+        chunk_duration = len(audio_chunk) / self.sample_rate
+        self._real_time += chunk_duration
+
         # === 静音检测（VAD）— 防止 Whisper 对静音幻觉出 "you" / "." ===
         rms = float(np.sqrt(np.mean(audio_chunk ** 2)))
         if rms < self.SILENCE_THRESHOLD:
-            chunk_duration = len(audio_chunk) / self.sample_rate
             self.silence_duration += chunk_duration
+            self._vad_skip_count += 1
+            self._vad_skip_secs += chunk_duration
+            buf_dur = len(self.buffer) / self.sample_rate
+            _debug(f"t={self._real_time:6.2f}s rms={rms:.4f} SKIP (silent) "
+                   f"buf_dur={buf_dur:.2f}s silence_run={self.silence_duration:.2f}s "
+                   f"total_skipped={self._vad_skip_secs:.1f}s")
             # 连续静音超过阈值 → flush buffer 中残留的有声内容
             if self.silence_duration >= self.SILENCE_FLUSH_SECONDS and len(self.buffer) > 0:
+                _debug(f"t={self._real_time:6.2f}s SILENCE_FLUSH (silence_run >= {self.SILENCE_FLUSH_SECONDS}s)")
                 result = self.flush()
                 return result
             return StreamResult(language=self.last_language)
+
+        if self.silence_duration > 0:
+            _debug(f"t={self._real_time:6.2f}s VAD_BRIDGE end-of-silence={self.silence_duration:.2f}s "
+                   f"(buffer now splices across this gap)")
         self.silence_duration = 0.0
 
         self.buffer = np.concatenate([self.buffer, audio_chunk])
@@ -104,6 +130,13 @@ class StreamingSTT:
         # 安全阀：buffer 太长，强制全部提交（防止内存无限增长）
         buffer_duration = len(self.buffer) / self.sample_rate
         if buffer_duration > self.MAX_BUFFER_SECONDS:
+            self._force_commit_count += 1
+            last_end = float(words[-1]["end"]) if words else 0.0
+            _debug(f"t={self._real_time:6.2f}s FORCE_COMMIT #{self._force_commit_count} "
+                   f"buf_dur={buffer_duration:.2f}s last_word_end={last_end:.2f}s "
+                   f"→ will cut {last_end:.2f}s, leave {buffer_duration - last_end:.2f}s  "
+                   f"words_n={len(words)}  "
+                   f"sample: {' '.join(w['word'] for w in words[-6:])!r}")
             committed_count = len(words)
 
         # 提交稳定前缀
@@ -134,10 +167,18 @@ class StreamingSTT:
 
             # last_words 清空：剩余 buffer 下次重新跑会产出新的 hypothesis
             self.last_words = []
+            buf_after = len(self.buffer) / self.sample_rate
+            _debug(f"t={self._real_time:6.2f}s COMMIT {committed_count}w "
+                   f"cut={cut_time_relative:.2f}s buf_after={buf_after:.2f}s "
+                   f"text={confirmed_text[:60]!r}")
         else:
             # 没东西提交，记下当前 hypothesis 等下次比对
             self.last_words = words
             tentative_text = self._words_to_text(words)
+            buf_dur_now = len(self.buffer) / self.sample_rate
+            _debug(f"t={self._real_time:6.2f}s NO_COMMIT buf_dur={buf_dur_now:.2f}s "
+                   f"hypothesis_n={len(words)} "
+                   f"tentative={tentative_text[:60]!r}")
 
         return StreamResult(
             confirmed_text=confirmed_text,
@@ -145,6 +186,15 @@ class StreamingSTT:
             language=self.last_language,
             confirmed_words=confirmed_words,
         )
+
+    def debug_stats(self) -> dict:
+        """返回本次 session 的累计统计（诊断用）。"""
+        return {
+            "real_time_s": self._real_time,
+            "vad_skip_count": self._vad_skip_count,
+            "vad_skip_secs": self._vad_skip_secs,
+            "force_commit_count": self._force_commit_count,
+        }
 
     def flush(self) -> StreamResult:
         """强制提交剩余 buffer。会话结束 / speaker 切换时调用。"""
