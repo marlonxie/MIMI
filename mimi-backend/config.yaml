@@ -4,15 +4,21 @@ server:
   host: "127.0.0.1"
   port: 8765
 
+# 用户语言偏好（同时驱动 STT 识别和翻译）
+# 未来前端接入后可由 WebSocket 消息按 session 覆盖
+user:
+  # 面试语言 — 音频/STT 识别的目标语言 (en / de / ...)
+  # 锁定后彻底绕开 Whisper auto-detect，避免 Welsh/其他低资源语言幻觉
+  # 设为 null → 自动检测（不推荐，详见 git log commit 95d5f1b）
+  interview_language: "en"
+  # 用户母语 — 翻译输出语言 (zh / en / ...)
+  # 目前翻译 prompt 硬编码为英→中，切换其他 native 语言需同步改 prompt
+  native_language: "zh"
+
 stt:
   # whisper 模型大小: tiny, base, small, medium, large
   # M2 Pro 16GB 推荐 small（速度和精度平衡）
   model_size: "small"
-  # 支持的语言
-  languages: ["en", "de"]
-  # 强制锁定识别语言（绕开 auto-detect，彻底避免 Welsh/其他低资源语言幻觉）
-  # 设为 null → 自动检测（会出现 Welsh 幻觉 bug，不推荐）
-  primary_language: "en"
 
 translator:
   # provider: "gemini" 或 "claude"
@@ -21,8 +27,6 @@ translator:
   # gemini: gemini-2.5-flash / gemini-2.5-pro / gemini-2.0-flash
   # claude: claude-sonnet-4-20250514
   model: "gemini-2.5-flash"
-  # 目标翻译语言
-  target_language: "zh"
 
 conversation:
   # 上下文窗口大小（最近 N 句对话）

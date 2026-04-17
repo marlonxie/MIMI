@@ -119,7 +119,8 @@ class Translator:
         translator_config = config["translator"]
         self.provider = translator_config["provider"]
         self.model_name = translator_config["model"]
-        self.target_language = translator_config["target_language"]
+        # 用户母语 = 翻译输出语言（当前 prompt 硬编码英→中，切换其他 native 需同步改 prompt）
+        self.native_language = config["user"]["native_language"]
 
         # 创建 LLM 实例
         # temperature=0：确定性输出。相同（text, context）产出相同翻译，用户体验更稳定
@@ -198,6 +199,17 @@ class Translator:
         }):
             if chunk:
                 yield chunk
+
+    def set_native_language(self, language: str) -> None:
+        """运行时切换翻译输出语言。
+
+        注意：当前 TRANSLATE_SYSTEM prompt 硬编码为"英→中"。
+        切到其他 native 语言需同步调整 prompt，否则翻译结果不变。
+
+        Args:
+            language: ISO 639-1 代码（"zh" / "en" / ...）
+        """
+        self.native_language = language
 
     @staticmethod
     def _get_source_hint(source_language: str = None) -> str:

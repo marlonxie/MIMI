@@ -33,8 +33,7 @@ class SpeechToText:
             config = yaml.safe_load(f)
 
         self.model_size = config["stt"]["model_size"]
-        self.languages = config["stt"]["languages"]
-        self.primary_language = config["stt"].get("primary_language", "en")
+        self.interview_language = config["user"]["interview_language"]
         self.sample_rate = config["audio"]["sample_rate"]
 
         if self.model_size not in self.MODEL_REPO_MAP:
@@ -89,7 +88,7 @@ class SpeechToText:
         result = mlx_whisper.transcribe(
             audio_data,
             path_or_hf_repo=self.model_repo,
-            language=self.primary_language,  # None=自动检测（会幻觉成 Welsh），锁定=强制识别为该语言
+            language=self.interview_language,  # None=自动检测（会幻觉成 Welsh），锁定=强制识别为该语言
             task="transcribe",
             word_timestamps=True,  # LocalAgreement-2 需要 word-level 时间戳
             condition_on_previous_text=False,  # 关闭跨段条件化，显著减少重复幻觉
@@ -116,12 +115,20 @@ class SpeechToText:
             ],
         }
 
+    def set_interview_language(self, language: str | None) -> None:
+        """运行时切换识别语言。下一次 transcribe_audio() 调用生效。
+
+        Args:
+            language: ISO 639-1 代码（"en" / "de" / ...）；None = 自动检测（不推荐）
+        """
+        self.interview_language = language
+
     def transcribe_file(self, audio_path: str) -> dict:
         """转写音频文件（路径或 numpy 数组都可以传给 mlx-whisper）"""
         result = mlx_whisper.transcribe(
             audio_path,
             path_or_hf_repo=self.model_repo,
-            language=self.primary_language,
+            language=self.interview_language,
             task="transcribe",
             word_timestamps=True,
         )
