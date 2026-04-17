@@ -10,6 +10,9 @@ stt:
   model_size: "small"
   # 支持的语言
   languages: ["en", "de"]
+  # 强制锁定识别语言（绕开 auto-detect，彻底避免 Welsh/其他低资源语言幻觉）
+  # 设为 null → 自动检测（会出现 Welsh 幻觉 bug，不推荐）
+  primary_language: "en"
 
 translator:
   # provider: "gemini" 或 "claude"
