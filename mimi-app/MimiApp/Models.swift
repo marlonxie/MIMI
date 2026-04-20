@@ -85,6 +85,34 @@ struct ControlMessage: Codable {
     static let flush = ControlMessage(type: "flush")
 }
 
+struct LanguageConfigMessage: Codable {
+    let type: String
+    let interviewLanguage: String
+    let nativeLanguage: String
+
+    init(interview: String, native: String) {
+        self.type = "set_languages"
+        self.interviewLanguage = interview
+        self.nativeLanguage = native
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case interviewLanguage = "interview_language"
+        case nativeLanguage = "native_language"
+    }
+}
+
+struct SuggestionConfigMessage: Codable {
+    let type: String
+    let enabled: Bool
+
+    init(enabled: Bool) {
+        self.type = "set_suggestion_enabled"
+        self.enabled = enabled
+    }
+}
+
 // MARK: - App State
 
 /// 一行字幕。class + @Observable，按 sentenceId 索引，字段可被流式增量更新。

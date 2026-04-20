@@ -7,6 +7,9 @@ class AudioCaptureManager {
     var isCapturing = false
     var onAudioChunk: (@MainActor (Data, String) -> Void)?
 
+    var isMicrophoneRunning: Bool { audioEngine?.isRunning ?? false }
+    var isSystemAudioRunning: Bool { scStream != nil }
+
     private let targetSampleRate: Double = 16000
     // 1.0s 对应后端 LocalAgreement-2 流式 STT 的更新周期。
     // 改这个值时记得同步改 mimi-backend/config.yaml 的 audio.chunk_duration
@@ -40,7 +43,7 @@ class AudioCaptureManager {
 
     // MARK: - Microphone
 
-    private func startMicrophoneCapture() async throws {
+    func startMicrophoneCapture() async throws {
         // macOS 必须主动请求麦克风权限才会弹系统弹窗（仅 Info.plist key 不够）
         let granted = await withCheckedContinuation { continuation in
             AVAudioApplication.requestRecordPermission { granted in
@@ -106,7 +109,7 @@ class AudioCaptureManager {
         try engine.start()
     }
 
-    private func stopMicrophoneCapture() {
+    func stopMicrophoneCapture() {
         audioEngine?.inputNode.removeTap(onBus: 0)
         audioEngine?.stop()
         audioEngine = nil
@@ -115,7 +118,7 @@ class AudioCaptureManager {
 
     // MARK: - System Audio
 
-    private func startSystemAudioCapture() async throws {
+    func startSystemAudioCapture() async throws {
         let content = try await SCShareableContent.excludingDesktopWindows(
             false, onScreenWindowsOnly: false
         )
@@ -185,7 +188,7 @@ class AudioCaptureManager {
         try await stream.startCapture()
     }
 
-    private nonisolated func stopSystemAudioCapture() {
+    nonisolated func stopSystemAudioCapture() {
         Task { @MainActor [weak self] in
             try? await self?.scStream?.stopCapture()
             self?.scStream = nil

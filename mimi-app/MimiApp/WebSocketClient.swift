@@ -64,6 +64,12 @@ class WebSocketClient {
 
     func sendExport() { sendJSON(ControlMessage.export) }
     func sendFlush() { sendJSON(ControlMessage.flush) }
+    func sendLanguages(interview: String, native: String) {
+        sendJSON(LanguageConfigMessage(interview: interview, native: native))
+    }
+    func sendSuggestionEnabled(_ enabled: Bool) {
+        sendJSON(SuggestionConfigMessage(enabled: enabled))
+    }
 
     // MARK: - Receive
 

@@ -130,6 +130,26 @@ async def websocket_endpoint(websocket: WebSocket):
                     for source in sources.values():
                         await source.flush()
 
+                elif msg_type == "set_languages":
+                    interview = data.get("interview_language")
+                    native = data.get("native_language")
+                    if interview is not None:
+                        stt.set_interview_language(interview)
+                    if native is not None:
+                        translator.set_native_language(native)
+                    await websocket.send_json({
+                        "type": "languages_ack",
+                        "interview_language": stt.interview_language,
+                        "native_language": translator.native_language,
+                    })
+
+                elif msg_type == "set_suggestion_enabled":
+                    enable_suggestion = bool(data.get("enabled", True))
+                    await websocket.send_json({
+                        "type": "suggestion_ack",
+                        "enabled": enable_suggestion,
+                    })
+
                 continue
 
             # === 二进制消息（音频） — 分发到对应 AudioSource ===

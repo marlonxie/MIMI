@@ -6,9 +6,17 @@ struct MimiApp: App {
     @State private var appState = AppState()
 
     var body: some Scene {
-        MenuBarExtra("MIMI", systemImage: appState.isCapturing ? "mic.fill" : "mic") {
+        MenuBarExtra("MIMI", systemImage: menuBarIcon) {
             MenuBarView(appState: appState, appDelegate: appDelegate)
         }
+        Settings {
+            SettingsView(appState: appState)
+        }
+    }
+
+    private var menuBarIcon: String {
+        guard appState.isCapturing else { return "mic" }
+        return appState.isMicrophoneEnabled ? "mic.fill" : "mic.slash.fill"
     }
 }
 
@@ -103,6 +111,11 @@ struct MenuBarView: View {
                 appState.wsClient.sendExport()
             }
 
+            SettingsLink {
+                Text("设置…")
+            }
+            .keyboardShortcut(",")
+
             Button("退出") {
                 appState.cleanup()
                 NSApplication.shared.terminate(nil)
@@ -122,6 +135,36 @@ class AppState {
     var currentSuggestion: String?
     var isCapturing = false
 
+    // 运行时两路状态（不持久 — 每次启动默认都开）
+    var isMicrophoneEnabled = true
+    var isSystemAudioEnabled = true
+
+    // 持久化偏好（UserDefaults）— didSet 同时写入磁盘和推送到后端
+    var interviewLanguage: String = UserDefaults.standard.string(forKey: "interviewLanguage") ?? "en" {
+        didSet {
+            UserDefaults.standard.set(interviewLanguage, forKey: "interviewLanguage")
+            if wsClient.isConnected {
+                wsClient.sendLanguages(interview: interviewLanguage, native: nativeLanguage)
+            }
+        }
+    }
+    var nativeLanguage: String = UserDefaults.standard.string(forKey: "nativeLanguage") ?? "zh" {
+        didSet {
+            UserDefaults.standard.set(nativeLanguage, forKey: "nativeLanguage")
+            if wsClient.isConnected {
+                wsClient.sendLanguages(interview: interviewLanguage, native: nativeLanguage)
+            }
+        }
+    }
+    var suggestionEnabled: Bool = (UserDefaults.standard.object(forKey: "suggestionEnabled") as? Bool) ?? false {
+        didSet {
+            UserDefaults.standard.set(suggestionEnabled, forKey: "suggestionEnabled")
+            if wsClient.isConnected {
+                wsClient.sendSuggestionEnabled(suggestionEnabled)
+            }
+        }
+    }
+
     let wsClient = WebSocketClient()
     let audioCapture = AudioCaptureManager()
 
@@ -134,8 +177,12 @@ class AppState {
         wsClient.connect()
         do {
             wsClient.sendConfig(source: "interviewer")
+            wsClient.sendLanguages(interview: interviewLanguage, native: nativeLanguage)
+            wsClient.sendSuggestionEnabled(suggestionEnabled)
             try await audioCapture.startCapture()
             isCapturing = true
+            isMicrophoneEnabled = audioCapture.isMicrophoneRunning
+            isSystemAudioEnabled = audioCapture.isSystemAudioRunning
         } catch {
             print("启动捕获失败: \(error)")
         }
@@ -145,6 +192,35 @@ class AppState {
         audioCapture.stopCapture()
         wsClient.sendFlush()
         isCapturing = false
+    }
+
+    func toggleMicrophone() async {
+        if isMicrophoneEnabled {
+            audioCapture.stopMicrophoneCapture()
+        } else {
+            do {
+                try await audioCapture.startMicrophoneCapture()
+            } catch {
+                print("麦克风启用失败: \(error)")
+                return
+            }
+        }
+        isMicrophoneEnabled = audioCapture.isMicrophoneRunning
+    }
+
+    func toggleSystemAudio() async {
+        if isSystemAudioEnabled {
+            audioCapture.stopSystemAudioCapture()
+            isSystemAudioEnabled = false  // stop 是异步 task，立即翻转 UI 状态
+        } else {
+            do {
+                try await audioCapture.startSystemAudioCapture()
+            } catch {
+                print("屏幕录制启用失败: \(error)")
+                return
+            }
+            isSystemAudioEnabled = audioCapture.isSystemAudioRunning
+        }
     }
 
     func cleanup() {
