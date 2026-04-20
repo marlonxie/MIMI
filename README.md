@@ -1,34 +1,55 @@
 # MIMI 面试助手
 
-Real-time interview assistant for Mandarin speakers doing English/German interviews. Captures system audio + microphone, transcribes with streaming Whisper, translates live to Chinese, and optionally generates answer suggestions via RAG.
+Real-time interview assistant for Mandarin speakers doing English/German interviews. Captures system audio + microphone, transcribes with streaming Whisper, translates live to the native language, and optionally generates answer suggestions via RAG.
 
 ## What It Does
 
-- **Live transcription** — Captures interviewer (system audio) and your voice (microphone) separately via ScreenCaptureKit
-- **Streaming subtitles** — Words appear as they're spoken using LocalAgreement-2 algorithm, ~2s latency
-- **Real-time translation** — Streams Chinese translation token-by-token as sentences complete
-- **Answer suggestions** (optional) — RAG-powered hints based on your resume/prep docs, triggered after interviewer pauses
+- **Live transcription** — Separates interviewer (system audio) from your voice (microphone) via ScreenCaptureKit
+- **Streaming subtitles** — Words appear as they're spoken using LocalAgreement-2, ~2s latency
+- **Real-time translation** — Streams translation token-by-token (interview language → your native language)
+- **Smart answer suggestions** — Three-layer trigger (local filter → intent LLM → RAG) automatically detects real questions and skips fillers; manual override via clickable subtitle
+- **Bilingual output** — Suggestions rendered in 3 sections: 📌 question understanding (native) + 💡 key points (bilingual) + 🗣️ sample answer (interview language, STAR style with metrics)
+- **Runtime controls** — Floating overlay with mic + screen-recording toggles; menu bar; Cmd+, Settings panel for language + RAG toggles
 - **Floating overlay** — Transparent always-on-top subtitle window that sits over any video call app
 
 ## Architecture
 
 ```
-Swift App (SwiftUI)  ──WebSocket (binary: source prefix + PCM)──→  Python Backend (FastAPI)
-│                                                                       │
-├─ ScreenCaptureKit (system audio, 0x00)          AudioSource ("interviewer")  AudioSource ("me")
-├─ AVAudioEngine (microphone, 0x01)               ├─ StreamingSTT             ├─ StreamingSTT
-└─ NSPanel (floating overlay)                     ├─ SentenceSegmenter        ├─ SentenceSegmenter
-                                                  └─ partial_id              └─ partial_id
-                                                          ↓                          ↓
-                                                    SharedHistory (shared conversation record)
-                                                          ↓
-                                               translator.py    rag/engine.py
-                                               (Gemini/Claude)  (LangChain+ChromaDB)
+Swift App (SwiftUI) ──WebSocket (binary PCM + JSON)──→ Python Backend (FastAPI)
+│                                                              │
+├─ ScreenCaptureKit (system audio, prefix 0x00)       ┌────────┴────────┐
+├─ AVAudioEngine  (microphone,    prefix 0x01)        │                 │
+├─ NSPanel (floating overlay, auto level-swap)        ▼                 ▼
+└─ Settings scene (Cmd+,)                     AudioSource          AudioSource
+                                              (interviewer)        (me)
+                                              ├─ StreamingSTT      ├─ StreamingSTT
+                                              ├─ SentenceSegmenter ├─ SentenceSegmenter
+                                              └─ partial_id        └─ partial_id
+                                                         ↓                ↓
+                                                      SharedHistory (shared)
+                                                      │
+                                                      ├──→ translator (streaming)
+                                                      │
+                                                      └──→ RAG suggestion pipeline:
+                                                            [A] question_filter
+                                                            [B] intent_classifier (LLM gate)
+                                                            [C] rag/engine.py
+                                                            manual path: bypasses A/B
 ```
 
-**Frontend**: Native macOS app in Swift/SwiftUI. Captures system audio and microphone independently in 1s PCM chunks (each tagged with a 1-byte source prefix), sends over WebSocket, renders streaming subtitles with partial/final states.
+**Frontend**: Native macOS app in Swift/SwiftUI. Captures system audio and microphone independently in 1s PCM chunks (each tagged with a 1-byte source prefix), sends over WebSocket, renders streaming subtitles with partial/final states. `NSPanel` overlay auto-drops to `.normal` level when another window becomes key (so the Settings window isn't blocked by the floating subtitle).
 
-**Backend**: Python FastAPI WebSocket server. Each audio source (interviewer/microphone) has an independent `AudioSource` pipeline running in its own coroutine. Audio chunks feed into a cumulative buffer; Whisper (mlx-whisper on Metal GPU) runs on the full buffer each time, and LocalAgreement-2 extracts stable words by comparing consecutive inferences. Stable text flows through per-speaker sentence segmentation → shared history → LLM translation (streamed) → optional RAG suggestion.
+**Backend**: Python FastAPI WebSocket server. Each audio source (interviewer/me) has an independent `AudioSource` pipeline running in its own coroutine. Audio chunks feed a cumulative buffer; Whisper (mlx-whisper on Metal GPU) runs on the full buffer each time, and LocalAgreement-2 extracts stable words by comparing consecutive inferences. Stable text flows through per-speaker sentence segmentation → shared history → streamed LLM translation → optional RAG answer pipeline.
+
+**Suggestion trigger** (three layers, all bypassed by manual click):
+
+| Layer | Cost | Filters |
+|---|---|---|
+| `conversation/question_filter.py` | O(1), local | Length < 3 words / pure punctuation / bilingual filler blacklist ("OK", "Got it", "Ja", ...) |
+| `conversation/intent_classifier.py` | ~300ms Gemini flash | Semantic non-questions ("So our team uses Python", "Let me think") |
+| `rag/engine.py` | ~2s Gemini flash + ChromaDB | Retrieval + bilingual tri-section answer generation |
+
+Manual override: click an interviewer subtitle row → 💡 icon appears → click to trigger RAG directly on that sentence with 5 lines of focused context. Manual always preempts an in-flight auto task.
 
 ## Tech Stack
 
@@ -36,14 +57,14 @@ Swift App (SwiftUI)  ──WebSocket (binary: source prefix + PCM)──→  Pyt
 |-------|------|
 | Audio capture | ScreenCaptureKit + AVAudioEngine |
 | Audio pipeline | AudioSource (per-speaker: StreamingSTT + SentenceSegmenter) |
-| Speech-to-text | mlx-whisper (Apple Silicon Metal GPU + ANE) |
+| Speech-to-text | mlx-whisper fp16 (Apple Silicon Metal GPU + ANE) |
 | Streaming STT | LocalAgreement-2 (consecutive-inference LCP) |
-| Speaker ID | source-based (system audio → interviewer, mic → me) |
 | Conversation | SharedHistory (shared) + SentenceSegmenter (per-speaker) |
-| Translation | LangChain LCEL → Gemini Flash / Claude Sonnet |
-| RAG | LangChain + ChromaDB + all-MiniLM-L6-v2 |
-| Frontend | SwiftUI + NSPanel overlay |
-| Transport | WebSocket (binary audio + JSON messages) |
+| Translation | LangChain LCEL → Gemini Flash / Claude Sonnet, streamed |
+| RAG | LangChain + ChromaDB + all-MiniLM-L6-v2 embeddings |
+| Question gate | Gemini flash yes/no classifier |
+| Frontend | SwiftUI + NSPanel overlay + Settings scene |
+| Transport | WebSocket (binary audio + JSON control messages) |
 
 ## Requirements
 
@@ -62,29 +83,53 @@ cd MIMI
 # 2. Python environment
 conda create -n mimi python=3.11
 conda activate mimi
-pip install -r mimi-backend/requirements.txt  # mlx-whisper, fastapi, langchain, etc.
+pip install -r mimi-backend/requirements.txt
 
 # 3. Environment variables
 cp mimi-backend/.env.example mimi-backend/.env
 # Edit .env with your API keys
 
-# 4. Start backend
-cd mimi-backend && python server.py
-# WebSocket server on ws://127.0.0.1:8765
+# 4. (Optional) Drop your resume / prep docs into resources/ and index for RAG
+mkdir -p resources
+# ...add your .md / .pdf / .txt files...
+cd mimi-backend && python -m rag.indexer
 
-# 5. Build & run the Swift app in Xcode
-open mimi-app/MimiApp.xcodeproj
+# 5. Start backend
+python server.py
+# WebSocket on ws://127.0.0.1:8765
+
+# 6. Build & run the Swift app
+open ../mimi-app/MimiApp.xcodeproj
 # Grant microphone + screen recording permissions when prompted
 ```
 
 ## Configuration
 
-All settings in [`mimi-backend/config.yaml`](mimi-backend/config.yaml):
+All settings in [`mimi-backend/config.yaml`](mimi-backend/config.yaml). Key fields:
 
-- `stt.model_size` — Whisper model (tiny/base/small/medium/large)
-- `translator.provider` — "gemini" or "claude"
-- `conversation.enable_suggestion` — Toggle RAG answer hints
-- `conversation.suggestion_debounce` — Seconds to wait after interviewer stops before generating suggestion
+```yaml
+user:
+  interview_language: "en"    # STT + translation source (en / de)
+  native_language: "zh"       # translation target (zh / en)
+
+stt:
+  model_size: "small"         # tiny / base / small / medium / large
+
+translator:
+  provider: "gemini"          # "gemini" or "claude"
+  model: "gemini-2.5-flash"
+
+conversation:
+  enable_suggestion: false    # auto RAG trigger (manual always works)
+  suggestion_debounce: 1.5    # short debounce so consecutive sentences merge
+  intent_gate: true           # LLM yes/no gate between filter and RAG
+
+audio:
+  sample_rate: 16000
+  chunk_duration: 1.0         # seconds per STT update cycle
+```
+
+Runtime-mutable via the Swift Settings panel (Cmd+,): `interview_language`, `native_language`, `enable_suggestion`. Changes push to the backend over WebSocket without reconnecting.
 
 ## License
 
