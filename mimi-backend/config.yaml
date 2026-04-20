@@ -31,10 +31,13 @@ translator:
 conversation:
   # 上下文窗口大小（最近 N 句对话）
   context_window_size: 10
-  # 是否启用 RAG 回答提示（false = 只翻译，不生成答案建议）
+  # 是否启用 RAG 回答提示（false = 只翻译，不自动生成答案建议；但 manual 触发仍可用）
   enable_suggestion: false
-  # 面试官最后一句后等几秒再触发回答提示（debounce）
-  suggestion_debounce: 3.0
+  # Auto path 的短 debounce（让面试官连续句子归并进同一次触发）
+  suggestion_debounce: 1.5
+  # 三层 pipeline 第二层：LLM 判定这句是否值得生成建议（过滤寒暄/过渡语）
+  # 关掉 → 退化成"每句过 local filter 就触发 RAG"
+  intent_gate: true
   # 对话记录导出路径
   export_path: "./transcripts"
 

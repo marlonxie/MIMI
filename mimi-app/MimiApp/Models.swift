@@ -113,6 +113,72 @@ struct SuggestionConfigMessage: Codable {
     }
 }
 
+struct ManualSuggestMessage: Codable {
+    let type: String
+    let sentenceId: String
+
+    init(sentenceId: String) {
+        self.type = "manual_suggest"
+        self.sentenceId = sentenceId
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case sentenceId = "sentence_id"
+    }
+}
+
+/// 三段式 suggestion 的客户端解析（按 📌 / 💡 / 🗣️ emoji 前缀拆分）。
+/// 后端 RAG prompt 强制输出这三段，前端在此分段便于 UI 分层渲染。
+struct ParsedSuggestion {
+    let understanding: String   // 📌 后
+    let keyPoints: String       // 💡 后
+    let sampleAnswer: String    // 🗣️ 后
+
+    static func parse(_ raw: String) -> ParsedSuggestion {
+        let markers = ["📌", "💡", "🗣️"]
+
+        func extract(_ marker: String) -> String {
+            guard let startRange = raw.range(of: marker) else { return "" }
+            let after = raw[startRange.upperBound...]
+            // 下一个 marker 的起点（不含当前 marker）
+            let nextStart: String.Index = markers
+                .filter { $0 != marker }
+                .compactMap { after.range(of: $0)?.lowerBound }
+                .min() ?? after.endIndex
+            var body = String(after[..<nextStart])
+            // 去掉 markdown 样式的 `**标题**\n` 前缀（常见格式："📌 **问题理解**\n..."）
+            body = body.trimmingCharacters(in: .whitespacesAndNewlines)
+            if body.hasPrefix("**") {
+                if let closeRange = body.range(of: "**", range: body.index(body.startIndex, offsetBy: 2)..<body.endIndex) {
+                    body = String(body[closeRange.upperBound...])
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+            }
+            return body
+        }
+
+        return ParsedSuggestion(
+            understanding: extract("📌"),
+            keyPoints: extract("💡"),
+            sampleAnswer: extract("🗣️")
+        )
+    }
+
+    /// 如果三段都空，fallback 把整段原文塞进 understanding
+    static func parseOrFallback(_ raw: String) -> ParsedSuggestion {
+        let parsed = parse(raw)
+        if parsed.understanding.isEmpty && parsed.keyPoints.isEmpty && parsed.sampleAnswer.isEmpty {
+            return ParsedSuggestion(
+                understanding: raw.trimmingCharacters(in: .whitespacesAndNewlines),
+                keyPoints: "",
+                sampleAnswer: ""
+            )
+        }
+        return parsed
+    }
+}
+
 // MARK: - App State
 
 /// 一行字幕。class + @Observable，按 sentenceId 索引，字段可被流式增量更新。

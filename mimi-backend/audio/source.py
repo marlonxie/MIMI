@@ -66,6 +66,10 @@ class AudioSource:
                     sentence_id = prev_id if i == 0 else str(uuid.uuid4())
                     insert_after = prev_id if i > 0 else None
 
+                    # sentence 是 shared_history 里同一个 dict 的引用，
+                    # 写 id 等于同时写入 history（供 manual_suggest 按 ID 反查）
+                    sentence["id"] = sentence_id
+
                     msg = {
                         "type": "transcript",
                         "sentence_id": sentence_id,
@@ -116,6 +120,7 @@ class AudioSource:
                 prev_id = self.pop_partial_id() or str(uuid.uuid4())
                 for i, sentence in enumerate(completed):
                     sentence_id = prev_id if i == 0 else str(uuid.uuid4())
+                    sentence["id"] = sentence_id  # 写回 history entry
                     await self.websocket.send_json({
                         "type": "transcript",
                         "sentence_id": sentence_id,
@@ -137,6 +142,7 @@ class AudioSource:
         flushed = self.segmenter.flush()
         for sentence in flushed:
             sid = self.pop_partial_id() or str(uuid.uuid4())
+            sentence["id"] = sid  # 写回 history entry
             await self.websocket.send_json({
                 "type": "transcript",
                 "sentence_id": sid,

@@ -70,6 +70,9 @@ class WebSocketClient {
     func sendSuggestionEnabled(_ enabled: Bool) {
         sendJSON(SuggestionConfigMessage(enabled: enabled))
     }
+    func sendManualSuggest(sentenceId: String) {
+        sendJSON(ManualSuggestMessage(sentenceId: sentenceId))
+    }
 
     // MARK: - Receive
 

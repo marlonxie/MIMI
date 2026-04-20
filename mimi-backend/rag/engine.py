@@ -15,23 +15,35 @@ from translation.langchain_translator import _create_llm
 load_dotenv(Path(__file__).parent.parent / ".env")
 
 LANG_MAP = {"en": "English", "de": "German"}
+NATIVE_LANG_MAP = {"zh": "中文", "en": "English"}
 
 RAG_PROMPT = ChatPromptTemplate.from_messages([
-    ("system", """你是面试答案助手，旁听面试对话，帮助候选人组织回答。
+    ("system", """你是实时面试答案助手。候选人母语是 {native_language_name}，面试语言是 {interview_language_name}。
 
-输出格式：
-1. 📌 问题理解（中文，1 句话概括面试官在问什么）
-2. 💡 回答要点（中文，3-5 个要点提示）
-3. 🗣️ 示例回答（用面试语言 {interview_language} 写，简洁易懂，可直接参考着说）
+**输出格式（严格三段，全部显示，不要省略）**：
 
-如果资料中没有直接相关信息，基于通用面试建议给出提示。
+📌 **问题理解**（用 {native_language_name}，一句话 ≤20 字）
+<直击面试官在问什么维度，去掉客套和语气词>
 
-候选人资料：
+💡 **要点**（3-5 条双语对照，每条 ≤15 字）
+• <{native_language_name} 要点> → <{interview_language_name} keyword>
+• ...
+
+🗣️ **示例回答**（用 {interview_language_name}，2-3 句 ≤60 词）
+<STAR 风格：情景→动作→具体数字→结果。必含真实数字/技术术语。>
+
+**风格硬约束**：
+- 禁用：maybe, I think, kind of, sort of, um, uh
+- 示例回答用 past tense 讲经历
+- 每个要点是名词短语，不是完整句子
+- 如果资料不相关，基于通用面试常识，要点减为 2-3 条
+
+**候选人资料**（按相关度排序）:
 {context}
 
-对话历史：
+**最近对话**:
 {conversation}"""),
-    ("human", "面试官最新说的：{latest_text}"),
+    ("human", "面试官刚才说的：\n{latest_text}"),
 ])
 
 
@@ -96,29 +108,31 @@ class RAGEngine:
         return context, sources
 
     async def generate_suggestion(
-        self, latest_text: str, language: str, conversation_context: str = ""
+        self,
+        latest_text: str,
+        interview_language: str,
+        native_language: str,
+        conversation_context: str = "",
     ) -> dict:
-        """
-        根据面试官最新发言 + 对话上下文 + 个人资料，生成回答提示。
+        """根据面试官最新发言 + 对话上下文 + 个人资料，生成三段式双语回答提示。
 
         Args:
-            latest_text: 面试官最新说的话
-            language: 面试语言代码 ("en", "de")
+            latest_text: 面试官最新说的话（或连续独白）
+            interview_language: 面试语言 ISO 代码（"en", "de"）
+            native_language: 用户母语 ISO 代码（"zh", "en"）
             conversation_context: 格式化的对话上下文窗口
 
         Returns:
             {"suggestion": str, "sources": list[str]}
         """
-        interview_language = LANG_MAP.get(language, "English")
-
-        # 检索一次，同时用于 context 和 sources
         context, sources = self._retrieve_and_format(latest_text)
 
         suggestion = await self.answer_chain.ainvoke({
             "context": context,
             "latest_text": latest_text,
             "conversation": conversation_context,
-            "interview_language": interview_language,
+            "interview_language_name": LANG_MAP.get(interview_language, "English"),
+            "native_language_name": NATIVE_LANG_MAP.get(native_language, "中文"),
         })
 
         return {
@@ -127,18 +141,21 @@ class RAGEngine:
         }
 
     def generate_suggestion_sync(
-        self, latest_text: str, language: str, conversation_context: str = ""
+        self,
+        latest_text: str,
+        interview_language: str,
+        native_language: str,
+        conversation_context: str = "",
     ) -> dict:
         """同步版本（用于测试）"""
-        interview_language = LANG_MAP.get(language, "English")
-
         context, sources = self._retrieve_and_format(latest_text)
 
         suggestion = self.answer_chain.invoke({
             "context": context,
             "latest_text": latest_text,
             "conversation": conversation_context,
-            "interview_language": interview_language,
+            "interview_language_name": LANG_MAP.get(interview_language, "English"),
+            "native_language_name": NATIVE_LANG_MAP.get(native_language, "中文"),
         })
 
         return {

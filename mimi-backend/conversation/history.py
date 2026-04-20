@@ -19,16 +19,43 @@ class SharedHistory:
         self.history: list[dict] = []  # 双路交织的完整对话记录
         self.start_time = time.time()
 
-    def add_sentence(self, speaker: str, text: str, language: str) -> dict:
-        """添加一个完成的句子到 history。返回 entry dict。"""
+    def add_sentence(
+        self, speaker: str, text: str, language: str, sentence_id: str | None = None
+    ) -> dict:
+        """添加一个完成的句子到 history。返回 entry dict。
+
+        Args:
+            sentence_id: 可选。传入则记到 entry["id"]，支持按 ID 反查（manual suggest）。
+        """
         entry = {
             "speaker": speaker,
             "text": text,
             "language": language,
             "timestamp": self.current_timestamp(),
         }
+        if sentence_id:
+            entry["id"] = sentence_id
         self.history.append(entry)
         return entry
+
+    def get_focused_context(self, sentence_id: str) -> tuple[str, str]:
+        """按 ID 找句子，返回 (query, context)。
+
+        query = 目标句文本
+        context = 目标句之前最多 5 句（[Interviewer]/[Me] 前缀格式化）
+
+        找不到返回 ("", "")。
+        """
+        for i, entry in enumerate(self.history):
+            if entry.get("id") == sentence_id:
+                query = entry["text"]
+                start = max(0, i - 5)
+                lines = []
+                for e in self.history[start:i]:
+                    label = "Interviewer" if e["speaker"] == "interviewer" else "Me"
+                    lines.append(f"[{label}] {e['text']}")
+                return query, "\n".join(lines)
+        return "", ""
 
     def get_context_window(self, n: int = None) -> str:
         """返回最近 n 句对话，格式化为 LLM 可读的上下文。

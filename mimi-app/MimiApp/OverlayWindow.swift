@@ -89,7 +89,13 @@ struct OverlayWindowContent: View {
                             let prevSpeaker = index > 0 ? appState.translations[index - 1].speaker : nil
                             let showSpeaker = entry.speaker != prevSpeaker
 
-                            TranslationRow(entry: entry, showSpeaker: showSpeaker)
+                            TranslationRow(
+                                entry: entry,
+                                showSpeaker: showSpeaker,
+                                isSelected: entry.id == appState.selectedSentenceId,
+                                onSelect: { appState.selectSentence(entry.id) },
+                                onRequestSuggestion: { appState.requestSuggestion(sentenceId: entry.id) }
+                            )
                                 .id(entry.id)
                                 .padding(.top, showSpeaker && index > 0 ? 12 : 0)
                         }
@@ -120,34 +126,58 @@ struct OverlayWindowContent: View {
 
     private var suggestionSection: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack {
+            HStack(spacing: 8) {
                 Text("回答提示")
                     .font(.caption)
                     .foregroundColor(.orange)
+                if appState.isGeneratingSuggestion {
+                    ProgressView()
+                        .scaleEffect(0.5)
+                        .frame(width: 14, height: 14)
+                    Text("思考中…")
+                        .font(.caption2)
+                        .foregroundColor(.gray)
+                }
                 Spacer()
             }
             .padding(.horizontal, 12)
             .padding(.top, 8)
 
             ScrollView {
-                if let suggestion = appState.currentSuggestion {
-                    Text(suggestion)
-                        .font(.system(size: 13))
-                        .foregroundColor(.white)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 12)
-                        .padding(.bottom, 8)
+                if let s = appState.currentSuggestion {
+                    VStack(alignment: .leading, spacing: 8) {
+                        if !s.understanding.isEmpty {
+                            Text("📌 \(s.understanding)")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(.white)
+                                .textSelection(.enabled)
+                        }
+                        if !s.keyPoints.isEmpty {
+                            Text("💡 \(s.keyPoints)")
+                                .font(.system(size: 12))
+                                .foregroundColor(.yellow.opacity(0.9))
+                                .textSelection(.enabled)
+                        }
+                        if !s.sampleAnswer.isEmpty {
+                            Text("🗣️ \(s.sampleAnswer)")
+                                .font(.system(size: 12))
+                                .foregroundColor(.white.opacity(0.85))
+                                .textSelection(.enabled)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 8)
                 } else {
-                    Text("等待面试官提问...")
-                        .font(.system(size: 13))
+                    Text("点击面试官字幕行 → 点击 💡 生成建议；或等待自动触发…")
+                        .font(.system(size: 12))
                         .foregroundColor(.gray)
                         .padding(.horizontal, 12)
                         .padding(.bottom, 8)
                 }
             }
         }
-        .frame(minHeight: 100)
+        .frame(minHeight: 120)
     }
 }
 
@@ -156,33 +186,66 @@ struct OverlayWindowContent: View {
 struct TranslationRow: View {
     @Bindable var entry: TranslationEntry
     var showSpeaker: Bool = true
+    var isSelected: Bool = false
+    var onSelect: (() -> Void)? = nil
+    var onRequestSuggestion: (() -> Void)? = nil
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            // 说话人标签：只在 speaker 切换时显示
-            if showSpeaker {
-                HStack(spacing: 4) {
-                    Text(entry.speakerLabel)
-                        .font(.caption2)
-                        .foregroundColor(entry.speaker == "interviewer" ? .cyan : .green)
-                        .fontWeight(.bold)
-                    Text(entry.timestamp)
-                        .font(.caption2)
-                        .foregroundColor(.gray)
+        HStack(alignment: .top, spacing: 6) {
+            // 主要内容
+            VStack(alignment: .leading, spacing: 2) {
+                // 说话人标签：只在 speaker 切换时显示
+                if showSpeaker {
+                    HStack(spacing: 4) {
+                        Text(entry.speakerLabel)
+                            .font(.caption2)
+                            .foregroundColor(entry.speaker == "interviewer" ? .cyan : .green)
+                            .fontWeight(.bold)
+                        Text(entry.timestamp)
+                            .font(.caption2)
+                            .foregroundColor(.gray)
+                    }
+                }
+
+                // 英文原文（文本选择放到 suggestion 区；这里不启用 textSelection 以免吃掉 tap）
+                Text(entry.original + (entry.isTranscriptFinal ? "" : " ▎"))
+                    .font(.system(size: 13))
+                    .foregroundColor(.white.opacity(entry.isTranscriptFinal ? 0.9 : 0.5))
+
+                if !entry.translation.isEmpty || entry.isTranscriptFinal {
+                    Text(entry.translation + (entry.isTranslationComplete ? "" : " ▎"))
+                        .font(.system(size: 13))
+                        .foregroundColor(.yellow.opacity(entry.isTranslationComplete ? 0.9 : 0.6))
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-            // 英文原文 + 中文翻译：始终分行显示
-            Text(entry.original + (entry.isTranscriptFinal ? "" : " ▎"))
-                .font(.system(size: 13))
-                .foregroundColor(.white.opacity(entry.isTranscriptFinal ? 0.9 : 0.5))
-                .textSelection(.enabled)
-            if !entry.translation.isEmpty || entry.isTranscriptFinal {
-                Text(entry.translation + (entry.isTranslationComplete ? "" : " ▎"))
-                    .font(.system(size: 13))
-                    .foregroundColor(.yellow.opacity(entry.isTranslationComplete ? 0.9 : 0.6))
-                    .textSelection(.enabled)
+            // 💡 按钮：选中 + interviewer，始终渲染（不受 showSpeaker 影响）
+            if entry.speaker == "interviewer" {
+                Button {
+                    onRequestSuggestion?()
+                } label: {
+                    Image(systemName: "lightbulb.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(isSelected ? .orange : .orange.opacity(0.0))
+                        .frame(width: 20, height: 20)
+                }
+                .buttonStyle(.plain)
+                .disabled(!isSelected)
+                .help("为这句生成回答建议")
             }
+        }
+        .padding(.vertical, 2)
+        .padding(.horizontal, 4)
+        .contentShape(Rectangle())
+        .background(
+            isSelected
+            ? Color.orange.opacity(0.12)
+            : Color.clear
+        )
+        .cornerRadius(4)
+        .onTapGesture {
+            onSelect?()
         }
     }
 }

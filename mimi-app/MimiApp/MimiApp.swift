@@ -31,6 +31,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         self.appState = appState
 
         if let panel = overlayPanel {
+            panel.level = .floating
             panel.makeKeyAndOrderFront(nil)
             return
         }
@@ -64,6 +65,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         panel.contentView = hostingView
         panel.makeKeyAndOrderFront(nil)
         overlayPanel = panel
+
+        // 当应用内其他窗口（如 Settings）变 key 时，临时把悬浮窗降到 normal 层；
+        // 对方关闭 / 失焦再回到 floating。否则 .floating(3) 会挡住 Settings(.normal=0)。
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(otherWindowBecameKey(_:)),
+            name: NSWindow.didBecomeKeyNotification, object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(otherWindowResignedKey(_:)),
+            name: NSWindow.didResignKeyNotification, object: nil
+        )
+    }
+
+    @objc func otherWindowBecameKey(_ notif: Notification) {
+        guard let w = notif.object as? NSWindow,
+              let panel = overlayPanel,
+              w !== panel else { return }
+        panel.level = .normal  // 让位，让 Settings 等能显示在上方
+    }
+
+    @objc func otherWindowResignedKey(_ notif: Notification) {
+        guard let w = notif.object as? NSWindow,
+              let panel = overlayPanel,
+              w !== panel else { return }
+        // 其他窗口失焦 → 恢复浮动（面试中保持字幕在面试视频上方）
+        panel.level = .floating
     }
 
     func hideOverlay() {
@@ -77,6 +104,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 struct MenuBarView: View {
     let appState: AppState
     let appDelegate: AppDelegate
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         VStack {
@@ -111,8 +139,11 @@ struct MenuBarView: View {
                 appState.wsClient.sendExport()
             }
 
-            SettingsLink {
-                Text("设置…")
+            Button("设置…") {
+                // MenuBarExtra 下 SettingsLink 偶尔只创建窗口不激活；
+                // 显式 activate + openSettings 更可靠
+                NSApp.activate(ignoringOtherApps: true)
+                openSettings()
             }
             .keyboardShortcut(",")
 
@@ -132,7 +163,9 @@ struct MenuBarView: View {
 @Observable
 class AppState {
     var translations: [TranslationEntry] = []
-    var currentSuggestion: String?
+    var currentSuggestion: ParsedSuggestion?
+    var isGeneratingSuggestion: Bool = false
+    var selectedSentenceId: String? = nil
     var isCapturing = false
 
     // 运行时两路状态（不持久 — 每次启动默认都开）
@@ -192,6 +225,19 @@ class AppState {
         audioCapture.stopCapture()
         wsClient.sendFlush()
         isCapturing = false
+    }
+
+    /// 两步点击交互第一步：高亮某条 interviewer 字幕行，让 💡 按钮出现
+    func selectSentence(_ sentenceId: String?) {
+        selectedSentenceId = sentenceId
+    }
+
+    /// 两步点击第二步：对选中句触发 RAG 建议生成
+    func requestSuggestion(sentenceId: String) {
+        guard wsClient.isConnected else { return }
+        isGeneratingSuggestion = true
+        wsClient.sendManualSuggest(sentenceId: sentenceId)
+        selectedSentenceId = nil
     }
 
     func toggleMicrophone() async {
@@ -276,7 +322,8 @@ class AppState {
         }
 
         wsClient.onSuggestion = { [weak self] msg in
-            self?.currentSuggestion = msg.suggestion
+            self?.currentSuggestion = ParsedSuggestion.parseOrFallback(msg.suggestion)
+            self?.isGeneratingSuggestion = false
         }
     }
 }
