@@ -13,6 +13,8 @@ langchain-anthropic>=1.4
 langchain-chroma>=1.1
 langchain-text-splitters>=1.1
 langchain-huggingface>=1.2
+langchain-community>=0.4    # PyPDFLoader / TextLoader for rag/indexer.py
+pypdf>=6.0                  # PDF parsing backend for PyPDFLoader
 chromadb>=1.5
 sentence-transformers>=4.1
 
