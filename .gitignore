@@ -42,7 +42,9 @@ PLAN.md
 *.wav
 *.mp3
 *.m4a
-!resources/
+
+# RAG 资料目录（用户的简历 / 项目资料等，只放本地）
+resources/
 
 # TED diagnostic test outputs (regenerated per run)
 mimi-backend/tests/fixtures/ted_run_*.txt
