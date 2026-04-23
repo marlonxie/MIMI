@@ -11,6 +11,7 @@ Real-time interview assistant for Mandarin speakers doing English/German intervi
 - **Bilingual output** — Suggestions rendered in 3 sections: 📌 question understanding (native) + 💡 key points (bilingual) + 🗣️ sample answer (interview language, STAR style with metrics)
 - **Runtime controls** — Floating overlay with mic + screen-recording toggles; menu bar; Cmd+, Settings panel for language + RAG toggles
 - **Floating overlay** — Transparent always-on-top subtitle window that sits over any video call app
+- **Speaker-safe** — Uses Apple's native `VoiceProcessingIO` AEC so interviewer audio played through the speaker is cancelled from the mic track; works without headphones, no virtual audio driver needed
 
 ## Architecture
 
@@ -56,6 +57,7 @@ Manual override: click an interviewer subtitle row → 💡 icon appears → cli
 | Layer | Tech |
 |-------|------|
 | Audio capture | ScreenCaptureKit + AVAudioEngine |
+| Echo cancellation | Apple `VoiceProcessingIO` (hardware AEC + NS + AGC, no extra deps) |
 | Audio pipeline | AudioSource (per-speaker: StreamingSTT + SentenceSegmenter) |
 | Speech-to-text | mlx-whisper fp16 (Apple Silicon Metal GPU + ANE) |
 | Streaming STT | LocalAgreement-2 (consecutive-inference LCP) |
