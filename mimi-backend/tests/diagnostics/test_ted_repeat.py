@@ -74,7 +74,7 @@ def run_once(stt: SpeechToText, audio: np.ndarray, sr: int, run_id: int) -> tupl
     t0 = time.time()
     for i in range(0, len(audio), chunk_samples):
         r = stream.feed(audio[i:i + chunk_samples])
-        if r.confirmed_text:
+        if r.confirmed_words:
             seg.add_words(r.confirmed_words, r.language)
 
         audio_elapsed = (i + chunk_samples) / sr
@@ -86,7 +86,7 @@ def run_once(stt: SpeechToText, audio: np.ndarray, sr: int, run_id: int) -> tupl
             next_progress += progress_every
 
     final = stream.flush()
-    if final.confirmed_text:
+    if final.confirmed_words:
         seg.add_words(final.confirmed_words, final.language)
     seg.flush()
     elapsed = time.time() - t0

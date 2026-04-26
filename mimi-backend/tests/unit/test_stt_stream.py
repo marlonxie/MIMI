@@ -1,7 +1,7 @@
 """测试 LocalAgreement-2 流式 STT。
 
 策略：把 30s 测试音频切成 1s 小块，逐块 feed，验证：
-1. 至少有几次产出 confirmed_text（流式提交在工作）
+1. 至少有几次产出 confirmed_words（流式提交在工作）
 2. 每次的 tentative_text 是当前 hypothesis 减去 confirmed
 3. flush 后的所有 confirmed 拼起来 ≈ 一次性离线 transcribe 的结果
 """
@@ -14,7 +14,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from audio.stt_mlx import SpeechToText
-from audio.streaming import StreamingSTT
+from audio.streaming import StreamingSTT, words_to_text
 
 
 AUDIO_PATH = Path(__file__).parent.parent / "test_audio.wav"
@@ -57,18 +57,20 @@ def test_streaming_pipeline():
         chunk = audio[i:i + chunk_samples]
         result = stream.feed(chunk)
         elapsed = (i + len(chunk)) / sr
-        if result.confirmed_text:
-            all_confirmed.append(result.confirmed_text)
-            print(f"  [{elapsed:5.1f}s] CONFIRMED: {result.confirmed_text!r}")
+        if result.confirmed_words:
+            text = words_to_text(result.confirmed_words)
+            all_confirmed.append(text)
+            print(f"  [{elapsed:5.1f}s] CONFIRMED: {text!r}")
         if result.tentative_text and result.tentative_text != last_tentative:
             print(f"  [{elapsed:5.1f}s]    tentative: {result.tentative_text!r}")
             last_tentative = result.tentative_text
 
     # flush 剩余
     final = stream.flush()
-    if final.confirmed_text:
-        all_confirmed.append(final.confirmed_text)
-        print(f"  [flush] CONFIRMED: {final.confirmed_text!r}")
+    if final.confirmed_words:
+        text = words_to_text(final.confirmed_words)
+        all_confirmed.append(text)
+        print(f"  [flush] CONFIRMED: {text!r}")
 
     streaming_text = " ".join(all_confirmed)
     print(f"\n[流式拼接结果] {streaming_text}")
@@ -94,7 +96,7 @@ def test_silence_chunk():
     silence = np.zeros(16000, dtype=np.float32)  # 1s 静音
     for _ in range(3):
         result = stream.feed(silence)
-        assert not result.confirmed_text, f"静音不应有 confirmed: {result.confirmed_text!r}"
+        assert not result.confirmed_words, f"静音不应有 confirmed: {result.confirmed_words!r}"
     print("静音测试通过 ✓")
 
 
@@ -134,7 +136,7 @@ def test_low_energy_noise_rejected():
     noise = np.random.randn(16000).astype(np.float32) * 0.005  # RMS ≈ 0.005 < 0.01 threshold
     for i in range(10):
         result = stream.feed(noise)
-        assert not result.confirmed_text, f"chunk {i}: 低能量噪音不应有 confirmed: {result.confirmed_text!r}"
+        assert not result.confirmed_words, f"chunk {i}: 低能量噪音不应有 confirmed: {result.confirmed_words!r}"
         assert not result.tentative_text, f"chunk {i}: 低能量噪音不应有 tentative: {result.tentative_text!r}"
     print("低能量噪音测试通过 ✓")
 

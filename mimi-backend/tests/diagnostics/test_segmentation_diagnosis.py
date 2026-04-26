@@ -18,7 +18,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from audio.stt_mlx import SpeechToText
-from audio.streaming import StreamingSTT
+from audio.streaming import StreamingSTT, words_to_text
 from conversation.history import SharedHistory
 from conversation.segmenter import SentenceSegmenter
 
@@ -104,20 +104,22 @@ def layer2_streaming_output(stt, audio, sr):
         buf_len = len(stream.buffer) / sr
         result = stream.feed(chunk)
 
-        if result.confirmed_text:
-            all_confirmed.append(result.confirmed_text)
+        if result.confirmed_words:
+            text = words_to_text(result.confirmed_words)
+            all_confirmed.append(text)
             all_confirmed_words.append(list(result.confirmed_words))
             buffer_lengths.append(buf_len)
-            print(f"  [{elapsed:5.1f}s] buf={buf_len:4.1f}s  CONFIRMED: {result.confirmed_text!r}")
+            print(f"  [{elapsed:5.1f}s] buf={buf_len:4.1f}s  CONFIRMED: {text!r}")
         elif result.tentative_text:
             print(f"  [{elapsed:5.1f}s] buf={buf_len:4.1f}s  tentative: {result.tentative_text[:60]!r}...")
 
     # flush
     final = stream.flush()
-    if final.confirmed_text:
-        all_confirmed.append(final.confirmed_text)
+    if final.confirmed_words:
+        text = words_to_text(final.confirmed_words)
+        all_confirmed.append(text)
         all_confirmed_words.append(list(final.confirmed_words))
-        print(f"  [flush] CONFIRMED: {final.confirmed_text!r}")
+        print(f"  [flush] CONFIRMED: {text!r}")
 
     streaming_text = " ".join(all_confirmed)
     print(f"\n拼接结果 ({len(streaming_text)} 字符):")
@@ -152,64 +154,30 @@ def layer2_punctuation_compare(offline_text, streaming_text):
         print(f"  标点丢失率: {loss_rate:.0%}")
 
 
-def layer3_segmentation(all_confirmed, all_confirmed_words):
-    """Layer 3: SentenceSegmenter 分句结果（对比 add_text vs add_words）"""
+def layer3_segmentation(all_confirmed_words):
+    """Layer 3: SentenceSegmenter 分句结果（add_words：标点 + 停顿 >0.5s）"""
     print("\n" + "=" * 70)
-    print("Layer 3a: SentenceSegmenter.add_text (原方案，只看 .?!)")
+    print("Layer 3: SentenceSegmenter.add_words")
     print("=" * 70)
 
-    history_a = SharedHistory()
-    seg_a = SentenceSegmenter("interviewer", history_a)
-    all_sentences_a = []
-    for confirmed in all_confirmed:
-        completed = seg_a.add_text(confirmed, "en")
-        for s in completed:
-            all_sentences_a.append(s["text"])
-            print(f"  [句子] ({len(s['text'])}字符) {s['text']}")
-    flushed = seg_a.flush()
-    for s in flushed:
-        all_sentences_a.append(s["text"])
-        print(f"  [flush] ({len(s['text'])}字符) {s['text']}")
-
-    print("\n" + "=" * 70)
-    print("Layer 3b: SentenceSegmenter.add_words (新方案，停顿 >0.5s 也切)")
-    print("=" * 70)
-
-    history_b = SharedHistory()
-    seg_b = SentenceSegmenter("interviewer", history_b)
-    all_sentences_b = []
+    history = SharedHistory()
+    seg = SentenceSegmenter("interviewer", history)
+    all_sentences = []
     for confirmed_words in all_confirmed_words:
-        completed = seg_b.add_words(confirmed_words, "en")
+        completed = seg.add_words(confirmed_words, "en")
         for s in completed:
-            all_sentences_b.append(s["text"])
+            all_sentences.append(s["text"])
             print(f"  [句子] ({len(s['text'])}字符) {s['text']}")
-    flushed = seg_b.flush()
+    flushed = seg.flush()
     for s in flushed:
-        all_sentences_b.append(s["text"])
+        all_sentences.append(s["text"])
         print(f"  [flush] ({len(s['text'])}字符) {s['text']}")
 
-    # 统计对比
-    def stats(sentences, label):
-        if not sentences:
-            print(f"\n{label}: 无句子")
-            return
-        lengths = [len(s) for s in sentences]
-        long_sentences = [s for s in sentences if len(s) > 100]
-        print(f"\n{label}:")
-        print(f"  总句数: {len(sentences)}")
-        print(f"  句子长度: min={min(lengths)}, max={max(lengths)}, avg={sum(lengths)/len(lengths):.0f}")
-        print(f"  长句(>100): {len(long_sentences)}")
-
-    stats(all_sentences_a, "add_text 统计")
-    stats(all_sentences_b, "add_words 统计")
-
-    # 为保持后续代码兼容，返回新方案的结果
-    all_sentences = all_sentences_b
     if all_sentences:
         lengths = [len(s) for s in all_sentences]
         long_sentences = [s for s in all_sentences if len(s) > 100]
-        # 占位，保持下面的打印逻辑不报错
-        print(f"\n(以下是 add_words 结果作为主结果)")
+        print(f"\n统计:")
+        print(f"  总句数: {len(all_sentences)}")
         print(f"  句子长度: min={min(lengths)}, max={max(lengths)}, avg={sum(lengths)/len(lengths):.0f}")
         if long_sentences:
             print(f"  超长句子 (>100字符): {len(long_sentences)} 个")
@@ -238,7 +206,7 @@ def main():
     layer2_punctuation_compare(offline_text, streaming_text)
 
     # Layer 3
-    streaming_sentences = layer3_segmentation(all_confirmed, all_confirmed_words)
+    streaming_sentences = layer3_segmentation(all_confirmed_words)
 
     # 总结
     print("\n" + "=" * 70)

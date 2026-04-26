@@ -24,10 +24,17 @@ def _debug(msg: str) -> None:
         print(f"[stream] {msg}", flush=True)
 
 
+def words_to_text(words: list) -> str:
+    """把 word 列表拼成自然文本。Whisper 的 word 通常自带前导空格。"""
+    return "".join(w["word"] for w in words).strip()
+
+
 @dataclass
 class StreamResult:
-    """每次 feed 后返回的结果。"""
-    confirmed_text: str = ""        # 新提交的稳定文本（增量，不重复历史）
+    """每次 feed 后返回的结果。
+
+    confirmed_words 是 canonical：要文本时用 words_to_text(confirmed_words) 派生。
+    """
     tentative_text: str = ""        # 当前未确认的候选文本（每次都会被替换）
     language: str = "unknown"
     confirmed_words: list = field(default_factory=list)  # [{word, start, end}, ...]
@@ -40,7 +47,7 @@ class StreamingSTT:
         stream = StreamingSTT(stt)
         while audio_chunk := await receive():
             result = stream.feed(audio_chunk)
-            if result.confirmed_text:
+            if result.confirmed_words:
                 # 提交稳定文本（不会再变）
                 ...
             # tentative_text 每次都会变，用于显示"正在识别"
@@ -140,11 +147,9 @@ class StreamingSTT:
             committed_count = len(words)
 
         # 提交稳定前缀
-        confirmed_text = ""
         confirmed_words: list = []
         if committed_count > 0:
             confirmed_words = words[:committed_count]
-            confirmed_text = self._words_to_text(confirmed_words)
 
             # ⚠️ 关键：必须先用相对 buffer 的时间算 cut，再把时间戳改成全局时间
             # 否则下面 for 循环里 mutate 后，cut_time 会变成全局时间导致截多了
@@ -159,7 +164,7 @@ class StreamingSTT:
 
             # tentative 部分文本（在裁剪前先算，因为下面要清空 last_words）
             tentative_words = words[committed_count:]
-            tentative_text = self._words_to_text(tentative_words)
+            tentative_text = words_to_text(tentative_words)
 
             # 截掉已提交的音频
             self.buffer = self.buffer[cut_samples:]
@@ -168,20 +173,20 @@ class StreamingSTT:
             # last_words 清空：剩余 buffer 下次重新跑会产出新的 hypothesis
             self.last_words = []
             buf_after = len(self.buffer) / self.sample_rate
-            _debug(f"t={self._real_time:6.2f}s COMMIT {committed_count}w "
-                   f"cut={cut_time_relative:.2f}s buf_after={buf_after:.2f}s "
-                   f"text={confirmed_text[:60]!r}")
+            if _DEBUG:
+                _debug(f"t={self._real_time:6.2f}s COMMIT {committed_count}w "
+                       f"cut={cut_time_relative:.2f}s buf_after={buf_after:.2f}s "
+                       f"text={words_to_text(confirmed_words)[:60]!r}")
         else:
             # 没东西提交，记下当前 hypothesis 等下次比对
             self.last_words = words
-            tentative_text = self._words_to_text(words)
+            tentative_text = words_to_text(words)
             buf_dur_now = len(self.buffer) / self.sample_rate
             _debug(f"t={self._real_time:6.2f}s NO_COMMIT buf_dur={buf_dur_now:.2f}s "
                    f"hypothesis_n={len(words)} "
                    f"tentative={tentative_text[:60]!r}")
 
         return StreamResult(
-            confirmed_text=confirmed_text,
             tentative_text=tentative_text,
             language=self.last_language,
             confirmed_words=confirmed_words,
@@ -207,18 +212,15 @@ class StreamingSTT:
         words = self._flatten_words(result["segments"])
         words = self._filter_repetitions(words)
 
-        text = ""
         confirmed_words: list = []
         if words:
             confirmed_words = words
-            text = self._words_to_text(words)
             for w in confirmed_words:
                 w["start"] = float(w["start"]) + self.buffer_offset
                 w["end"] = float(w["end"]) + self.buffer_offset
 
         self._reset_state()
         return StreamResult(
-            confirmed_text=text,
             tentative_text="",
             language=self.last_language,
             confirmed_words=confirmed_words,
@@ -269,11 +271,6 @@ class StreamingSTT:
             else:
                 break
         return n
-
-    @staticmethod
-    def _words_to_text(words: list) -> str:
-        """把 word 列表拼成自然文本。Whisper 的 word 通常自带前导空格。"""
-        return "".join(w["word"] for w in words).strip()
 
     @classmethod
     def _filter_repetitions(cls, words: list, max_repeat: int = 4) -> list:

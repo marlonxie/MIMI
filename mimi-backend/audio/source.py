@@ -56,9 +56,9 @@ class AudioSource:
         async with self._whisper_lock:
             result = await asyncio.to_thread(self.stream.feed, audio_data)
 
-        # === confirmed 文本 → 分句 → final 推送 ===
-        if result.confirmed_text:
-            # 用 add_words 利用词间停顿做自然分句（而非 add_text 只看 .?!）
+        # === confirmed words → 分句 → final 推送 ===
+        if result.confirmed_words:
+            # 利用词间停顿做自然分句（而非只看 .?!）
             completed = self.segmenter.add_words(result.confirmed_words, result.language)
             if completed:
                 prev_id = self.pop_partial_id() or str(uuid.uuid4())
@@ -114,7 +114,7 @@ class AudioSource:
         """强制提交 StreamingSTT 剩余 buffer + SentenceSegmenter pending。"""
         # StreamingSTT flush
         final = self.stream.flush()
-        if final.confirmed_text:
+        if final.confirmed_words:
             completed = self.segmenter.add_words(final.confirmed_words, final.language)
             if completed:
                 prev_id = self.pop_partial_id() or str(uuid.uuid4())

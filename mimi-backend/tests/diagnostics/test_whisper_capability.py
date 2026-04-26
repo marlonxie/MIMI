@@ -20,7 +20,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from audio.stt_mlx import SpeechToText
-from audio.streaming import StreamingSTT
+from audio.streaming import StreamingSTT, words_to_text
 from conversation.history import SharedHistory
 from conversation.segmenter import SentenceSegmenter
 
@@ -105,14 +105,14 @@ def run_streaming(stt, audio_chunk, sr):
     for i in range(0, len(audio_chunk), chunk_size):
         c = audio_chunk[i:i + chunk_size]
         r = stream.feed(c)
-        if r.confirmed_text:
-            all_confirmed.append(r.confirmed_text)
+        if r.confirmed_words:
+            all_confirmed.append(words_to_text(r.confirmed_words))
             all_confirmed_words.extend(r.confirmed_words)
             segmenter.add_words(r.confirmed_words, r.language)
 
     final = stream.flush()
-    if final.confirmed_text:
-        all_confirmed.append(final.confirmed_text)
+    if final.confirmed_words:
+        all_confirmed.append(words_to_text(final.confirmed_words))
         all_confirmed_words.extend(final.confirmed_words)
         segmenter.add_words(final.confirmed_words, final.language)
 
