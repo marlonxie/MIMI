@@ -93,19 +93,28 @@ class AudioSource:
                 self.last_triggered_sentences = completed
 
         # === partial 推送（灰色行） ===
-        preview = self.segmenter.pending_text or ""
-        if result.tentative_text:
-            preview = (preview + " " + result.tentative_text).strip() if preview else result.tentative_text
+        # 协议拆双段：stable_text 来自 segmenter pending（已 commit，永不变），
+        # tentative_text 来自 stream hypothesis 未 commit 部分（可能漂移）。
+        # 前端按两段不同稳定性分别渲染，避免"灰色字消失再出现"现象。
+        stable_text = self.segmenter.pending_text or ""
+        tentative_text = result.tentative_text or ""
 
-        if preview:
+        if stable_text or tentative_text:
             if self.partial_id is None:
                 self.partial_id = str(uuid.uuid4())
+            # text 保留为兼容字段（旧客户端走这条路径）
+            if stable_text and tentative_text:
+                text = (stable_text + " " + tentative_text).strip()
+            else:
+                text = stable_text or tentative_text
             await self.websocket.send_json({
                 "type": "transcript",
                 "sentence_id": self.partial_id,
                 "speaker": self.speaker,
                 "language": result.language,
-                "text": preview,
+                "text": text,
+                "stable_text": stable_text,
+                "tentative_text": tentative_text,
                 "is_final": False,
                 "timestamp": self.shared_history.current_timestamp(),
             })

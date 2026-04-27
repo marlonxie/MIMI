@@ -207,10 +207,22 @@ struct TranslationRow: View {
                     }
                 }
 
-                // 英文原文（文本选择放到 suggestion 区；这里不启用 textSelection 以免吃掉 tap）
-                Text(entry.original + (entry.isTranscriptFinal ? "" : " ▎"))
-                    .font(.system(size: 13))
-                    .foregroundColor(.white.opacity(entry.isTranscriptFinal ? 0.9 : 0.5))
+                // 英文原文：稳定段（半白色）+ 候选段（更淡灰 + 光标）。
+                // partial 的稳定段在新 hypothesis 改写时不抖；候选段是漂移区。
+                // 文本选择放到 suggestion 区；这里不启用 textSelection 以免吃掉 tap。
+                (
+                    Text(entry.stableText)
+                        .foregroundColor(.white.opacity(entry.isTranscriptFinal ? 0.9 : 0.85))
+                    +
+                    Text(entry.tentativeText.isEmpty
+                         ? ""
+                         : (entry.stableText.isEmpty ? "" : " ") + entry.tentativeText)
+                        .foregroundColor(.white.opacity(0.5))
+                    +
+                    Text(entry.isTranscriptFinal ? "" : " ▎")
+                        .foregroundColor(.white.opacity(0.5))
+                )
+                .font(.system(size: 13))
 
                 if !entry.translation.isEmpty || entry.isTranscriptFinal {
                     Text(entry.translation + (entry.isTranslationComplete ? "" : " ▎"))

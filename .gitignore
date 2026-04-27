@@ -48,3 +48,6 @@ resources/
 
 # TED diagnostic test outputs (regenerated per run)
 mimi-backend/tests/fixtures/ted_run_*.txt
+
+# Diagnostic audit outputs (regenerated per run)
+mimi-backend/tests/diagnostics/output/

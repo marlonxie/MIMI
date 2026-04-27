@@ -7,12 +7,16 @@ struct ServerMessage: Codable {
 }
 
 /// 英文识别结果（is_final 区分最终/部分）。Phase A 只发 is_final=true，Phase B 会发 partial。
+/// partial 消息后端会同时发 stable_text + tentative_text 双段，前端按稳定性分别渲染。
+/// 旧 server 不发这两个字段时为 nil，前端 fallback 到 text。
 struct TranscriptMessage: Codable {
     let type: String
     let sentenceId: String
     let speaker: String
     let language: String
     let text: String
+    let stableText: String?      // 已 confirmed 的稳定段（segmenter pending），永不变
+    let tentativeText: String?   // Whisper 还在猜的段（stream tentative），可能漂移
     let isFinal: Bool
     let timestamp: String
     let insertAfter: String?  // 多句拆分时，告诉前端插到哪个 ID 后面
@@ -23,6 +27,8 @@ struct TranscriptMessage: Codable {
         case speaker
         case language
         case text
+        case stableText = "stable_text"
+        case tentativeText = "tentative_text"
         case isFinal = "is_final"
         case timestamp
         case insertAfter = "insert_after"
@@ -188,7 +194,9 @@ final class TranslationEntry: Identifiable {
     let id: String              // = sentenceId，用于 ForEach / ScrollViewReader
     let speaker: String
     let timestamp: String
-    var original: String        // 英文，partial 时可能被更新
+    var original: String        // 完整英文（兼容字段；= stableText + tentativeText 拼接）
+    var stableText: String      // 已 confirmed 的稳定段（半白色，无光标）
+    var tentativeText: String   // Whisper 还在猜的段（更淡灰 + 光标 ▎）；final 时为空
     var translation: String     // 中文，translation_delta 追加，translation_final 定型
     var isTranscriptFinal: Bool // false = partial（半透明）
     var isTranslationComplete: Bool
@@ -198,6 +206,8 @@ final class TranslationEntry: Identifiable {
         speaker: String,
         timestamp: String,
         original: String,
+        stableText: String = "",
+        tentativeText: String = "",
         translation: String = "",
         isTranscriptFinal: Bool = true,
         isTranslationComplete: Bool = false
@@ -206,6 +216,8 @@ final class TranslationEntry: Identifiable {
         self.speaker = speaker
         self.timestamp = timestamp
         self.original = original
+        self.stableText = stableText
+        self.tentativeText = tentativeText
         self.translation = translation
         self.isTranscriptFinal = isTranscriptFinal
         self.isTranslationComplete = isTranslationComplete

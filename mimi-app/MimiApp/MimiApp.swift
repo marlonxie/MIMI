@@ -282,9 +282,16 @@ class AppState {
 
         wsClient.onTranscript = { [weak self] msg in
             guard let self else { return }
+            // partial 升级 final 时 tentative 段清空（final 没有候选段）
+            // 旧 server 不发新字段时 fallback：整段当 stable
+            let stable = msg.stableText ?? (msg.isFinal ? msg.text : msg.text)
+            let tentative = msg.isFinal ? "" : (msg.tentativeText ?? "")
+
             if let existing = self.translations.first(where: { $0.id == msg.sentenceId }) {
                 // 已有 entry — 原地更新（partial → final，或 partial 文字变化）
                 existing.original = msg.text
+                existing.stableText = stable
+                existing.tentativeText = tentative
                 existing.isTranscriptFinal = msg.isFinal
             } else {
                 // 新 entry
@@ -293,6 +300,8 @@ class AppState {
                     speaker: msg.speaker,
                     timestamp: msg.timestamp,
                     original: msg.text,
+                    stableText: stable,
+                    tentativeText: tentative,
                     isTranscriptFinal: msg.isFinal
                 )
                 // insert_after: 多句拆分时，插入到指定 ID 后面（保持阅读顺序）
