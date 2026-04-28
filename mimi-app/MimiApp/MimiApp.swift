@@ -38,7 +38,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         if hubPanel == nil {
             hubPanel = makeFloatingPanel(
-                autosaveName: "MIMI.Hub.v3",
+                autosaveName: "MIMI.Hub.v4",
                 defaultRect: NSRect(x: 0, y: 0, width: 320, height: 40),
                 rootView: AnyView(HubView(appState: appState, appDelegate: self)),
                 borderless: true   // hub 自带 minus / xmark，不要系统 traffic-light
@@ -46,7 +46,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if captionsPanel == nil {
             captionsPanel = makeFloatingPanel(
-                autosaveName: "MIMI.Captions.v2",
+                autosaveName: "MIMI.Captions.v4",
                 defaultRect: NSRect(x: 0, y: 0, width: 480, height: 240),
                 rootView: AnyView(CaptionsView(appState: appState)),
                 borderless: false
@@ -54,7 +54,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if suggestionPanel == nil {
             suggestionPanel = makeFloatingPanel(
-                autosaveName: "MIMI.Suggestion.v2",
+                autosaveName: "MIMI.Suggestion.v4",
                 defaultRect: NSRect(x: 0, y: 0, width: 480, height: 200),
                 rootView: AnyView(SuggestionView(appState: appState)),
                 borderless: false
@@ -63,7 +63,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         applyDefaultLayoutIfNeeded()
         installNotificationsOnce()
 
-        hubPanel?.makeKeyAndOrderFront(nil)
+        // hub 是 .borderless + .nonactivatingPanel，canBecomeKey 默认为 NO，
+        // 用 makeKeyAndOrderFront 会触发 "called on NSPanel ... canBecomeKeyWindow=NO" 警告。
+        // orderFront 即可让 hub 浮上来，鼠标点击仍然有效。
+        hubPanel?.orderFront(nil)
         applyCaptionsVisibility(appState.captionsVisible)
         applySuggestionVisibility(appState.suggestionVisible)
     }
@@ -93,7 +96,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// 从最小化恢复。按 *Visible 状态决定子窗是否随 hub 一起出现。
     func restoreAll() {
         guard let appState else { return }
-        hubPanel?.makeKeyAndOrderFront(nil)
+        hubPanel?.orderFront(nil)
         applyCaptionsVisibility(appState.captionsVisible)
         applySuggestionVisibility(appState.suggestionVisible)
     }
@@ -148,7 +151,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     ) -> NSPanel {
         let style: NSWindow.StyleMask = borderless
             ? [.borderless, .resizable, .nonactivatingPanel]
-            : [.titled, .closable, .resizable, .nonactivatingPanel]
+            : [.titled, .closable, .resizable, .nonactivatingPanel, .fullSizeContentView]
         let panel = NSPanel(
             contentRect: defaultRect,
             styleMask: style,
@@ -162,24 +165,41 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         panel.isOpaque = false
         panel.hasShadow = true
         panel.hidesOnDeactivate = false
+        // 关键：让 NSVisualEffectView 透出磨砂；不再叠 SwiftUI 实色
+        panel.backgroundColor = .clear
 
-        if borderless {
-            // 完全交给 SwiftUI Theme.panelBackground 渲染背景 + 圆角
-            panel.backgroundColor = NSColor(white: 0, alpha: 0)
-            let host = NSHostingView(rootView: rootView)
-            host.wantsLayer = true
-            host.layer?.cornerRadius = 10
-            host.layer?.masksToBounds = true
-            panel.contentView = host
-        } else {
-            // 保留系统 traffic-light（红/黄/绿），但隐藏标题文字 + titlebar 半透明融入主背景
+        if !borderless {
+            // 保留 traffic-light（红/黄/绿），但 titlebar 透明 + .fullSizeContentView
+            // 让磨砂层延伸到三圆按钮背后，得到全幅 iOS HUD 视觉
             panel.title = ""
             panel.titleVisibility = .hidden
             panel.titlebarAppearsTransparent = true
-            // 关键：给 titlebar 一个非透明的底色，否则会透出桌面（用户上一版反馈的现象）
-            panel.backgroundColor = NSColor(deviceRed: 0.08, green: 0.10, blue: 0.13, alpha: 0.85)
-            panel.contentView = NSHostingView(rootView: rootView)
         }
+
+        // ---- 磨砂玻璃容器（NSVisualEffectView + NSHostingView 叠层）----
+        let container = NSView(frame: NSRect(origin: .zero, size: defaultRect.size))
+        container.wantsLayer = true
+        container.layer?.cornerRadius = Theme.Radius.panel
+        container.layer?.cornerCurve  = .continuous
+        container.layer?.masksToBounds = true
+        container.autoresizingMask = [.width, .height]
+
+        let blur = NSVisualEffectView(frame: container.bounds)
+        blur.autoresizingMask = [.width, .height]
+        blur.material = .hudWindow              // 通知中心风深色磨砂
+        blur.blendingMode = .behindWindow
+        blur.state = .active
+        blur.isEmphasized = true
+        container.addSubview(blur)
+
+        let host = NSHostingView(rootView: rootView)
+        host.frame = container.bounds
+        host.autoresizingMask = [.width, .height]
+        host.wantsLayer = true
+        host.layer?.backgroundColor = NSColor.clear.cgColor   // 不能盖住磨砂
+        container.addSubview(host)
+
+        panel.contentView = container
         panel.setFrameAutosaveName(autosaveName)
         // 注：setFrameUsingName 会被 setFrameAutosaveName 自动调用一次
         return panel

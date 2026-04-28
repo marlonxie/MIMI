@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 字幕区：滚动的 TranslationRow 列表。从原 OverlayWindow translationSection 提取。
+/// 字幕区：滚动的 TranslationRow 列表。iOS 聊天风：speaker pill + 行内分隔。
 struct CaptionsView: View {
     @Bindable var appState: AppState
 
@@ -8,19 +8,19 @@ struct CaptionsView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text("翻译")
-                    .font(.caption)
-                    .foregroundColor(Theme.textMuted)
+                    .font(Theme.headerFont)
+                    .foregroundColor(Theme.labelSecondary)
                 Spacer()
                 Text("\(appState.translations.count) 条")
                     .font(.caption2)
-                    .foregroundColor(Theme.textMuted)
+                    .foregroundColor(Theme.labelTertiary)
             }
             .padding(.horizontal, 12)
             .padding(.top, 8)
 
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 4) {
+                    LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(Array(appState.translations.enumerated()), id: \.element.id) { index, entry in
                             let prevSpeaker = index > 0 ? appState.translations[index - 1].speaker : nil
                             let showSpeaker = entry.speaker != prevSpeaker
@@ -28,15 +28,16 @@ struct CaptionsView: View {
                             TranslationRow(
                                 entry: entry,
                                 showSpeaker: showSpeaker,
+                                isFirstInGroup: showSpeaker,
+                                isFirstRow: index == 0,
                                 isSelected: entry.id == appState.selectedSentenceId,
                                 onSelect: { appState.selectSentence(entry.id) },
                                 onRequestSuggestion: { appState.requestSuggestion(sentenceId: entry.id) }
                             )
                             .id(entry.id)
-                            .padding(.top, showSpeaker && index > 0 ? 12 : 0)
                         }
                     }
-                    .padding(.horizontal, 12)
+                    .padding(.horizontal, 8)
                     .padding(.bottom, 8)
                 }
                 .onChange(of: appState.translations.count) {
@@ -48,7 +49,6 @@ struct CaptionsView: View {
             }
         }
         .frame(minWidth: 360, minHeight: 150)
-        .background(Theme.panelBackground)
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
@@ -60,79 +60,111 @@ struct CaptionsView: View {
     }
 }
 
+// MARK: - Speaker chip (iOS pill)
+
+private struct SpeakerChip: View {
+    let label: String
+    let speaker: String   // "interviewer" | "me"
+
+    var body: some View {
+        let tint = speaker == "interviewer" ? Theme.systemBlue : Theme.systemGreen
+        Text(label.uppercased())
+            .font(Theme.chipFont)
+            .tracking(0.4)
+            .foregroundStyle(tint)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 2)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(tint.opacity(0.18))
+            )
+    }
+}
+
 // MARK: - Translation Row
 
 struct TranslationRow: View {
     @Bindable var entry: TranslationEntry
     var showSpeaker: Bool = true
+    var isFirstInGroup: Bool = false
+    var isFirstRow: Bool = false
     var isSelected: Bool = false
     var onSelect: (() -> Void)? = nil
     var onRequestSuggestion: (() -> Void)? = nil
 
     var body: some View {
-        HStack(alignment: .top, spacing: 6) {
-            VStack(alignment: .leading, spacing: 2) {
-                // speaker 标签：只在 speaker 切换时显示
-                if showSpeaker {
-                    HStack(spacing: 4) {
-                        Text(entry.speakerLabel)
-                            .font(.caption2)
-                            .foregroundColor(entry.speaker == "interviewer"
-                                ? Theme.interviewerAccent : Theme.meAccent)
-                            .fontWeight(.bold)
-                        Text(entry.timestamp)
-                            .font(.caption2)
-                            .foregroundColor(Theme.textMuted)
+        VStack(alignment: .leading, spacing: 0) {
+            if isFirstInGroup && !isFirstRow {
+                Rectangle()
+                    .fill(Theme.separator)
+                    .frame(height: 1)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 6)
+            }
+
+            HStack(alignment: .top, spacing: 8) {
+                VStack(alignment: .leading, spacing: 4) {
+                    if showSpeaker {
+                        HStack(spacing: 6) {
+                            SpeakerChip(label: entry.speakerLabel, speaker: entry.speaker)
+                            Text(entry.timestamp)
+                                .font(.caption2)
+                                .foregroundColor(Theme.labelTertiary)
+                            Spacer()
+                        }
+                    }
+
+                    // 原文：稳定段（亮）+ 候选段（更淡 + 光标）
+                    (
+                        Text(entry.stableText)
+                            .foregroundColor(Theme.labelPrimary)
+                        +
+                        Text(entry.tentativeText.isEmpty
+                             ? ""
+                             : (entry.stableText.isEmpty ? "" : " ") + entry.tentativeText)
+                            .foregroundColor(Theme.labelTertiary)
+                        +
+                        Text(entry.isTranscriptFinal ? "" : " ▎")
+                            .foregroundColor(Theme.labelTertiary)
+                    )
+                    .font(Theme.bodyFont)
+
+                    if !entry.translation.isEmpty || entry.isTranscriptFinal {
+                        Text(entry.translation + (entry.isTranslationComplete ? "" : " ▎"))
+                            .font(Theme.bodyFont)
+                            .foregroundColor(entry.isTranslationComplete
+                                ? Theme.labelSecondary
+                                : Theme.labelSecondary.opacity(0.6))
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-                // 原文：稳定段（亮）+ 候选段（淡灰 + 光标）
-                (
-                    Text(entry.stableText)
-                        .foregroundColor(entry.isTranscriptFinal ? Theme.textPrimary : Theme.textPrimary.opacity(0.92))
-                    +
-                    Text(entry.tentativeText.isEmpty
-                         ? ""
-                         : (entry.stableText.isEmpty ? "" : " ") + entry.tentativeText)
-                        .foregroundColor(Theme.textTertiary)
-                    +
-                    Text(entry.isTranscriptFinal ? "" : " ▎")
-                        .foregroundColor(Theme.textTertiary)
-                )
-                .font(.system(size: 13))
-
-                if !entry.translation.isEmpty || entry.isTranscriptFinal {
-                    Text(entry.translation + (entry.isTranslationComplete ? "" : " ▎"))
-                        .font(.system(size: 13))
-                        .foregroundColor(entry.isTranslationComplete
-                            ? Theme.translationColor
-                            : Theme.translationColor.opacity(0.6))
+                // 💡 选中 + interviewer 时的提示按钮，iOS tinted button
+                if entry.speaker == "interviewer" {
+                    Button {
+                        onRequestSuggestion?()
+                    } label: {
+                        Image(systemName: "lightbulb.fill")
+                            .font(.system(size: 13, weight: .regular))
+                            .foregroundStyle(isSelected ? .white : .clear)
+                            .frame(width: 24, height: 24)
+                            .background(isSelected ? Theme.systemBlue : Color.clear)
+                            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.button,
+                                                        style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!isSelected)
+                    .help("为这句生成回答建议")
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            // 💡 按钮：选中 + interviewer
-            if entry.speaker == "interviewer" {
-                Button {
-                    onRequestSuggestion?()
-                } label: {
-                    Image(systemName: "lightbulb.fill")
-                        .font(.system(size: 14))
-                        .foregroundStyle(isSelected ? Theme.warningAccent : Theme.warningAccent.opacity(0.0))
-                        .frame(width: 20, height: 20)
-                }
-                .buttonStyle(.plain)
-                .disabled(!isSelected)
-                .help("为这句生成回答建议")
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+            .background(isSelected ? Theme.systemBlue.opacity(0.12) : Color.clear)
+            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.button, style: .continuous))
+            .onTapGesture {
+                onSelect?()
             }
-        }
-        .padding(.vertical, 2)
-        .padding(.horizontal, 4)
-        .contentShape(Rectangle())
-        .background(isSelected ? Theme.warningAccent.opacity(0.12) : Color.clear)
-        .cornerRadius(4)
-        .onTapGesture {
-            onSelect?()
         }
     }
 }
@@ -140,35 +172,44 @@ struct TranslationRow: View {
 // MARK: - Previews
 
 #Preview("captions - 空") {
-    CaptionsView(appState: AppState())
-        .frame(width: 480, height: 240)
+    ZStack {
+        Theme.panelBaseSolid
+        CaptionsView(appState: AppState())
+    }
+    .frame(width: 480, height: 240)
 }
 
 #Preview("captions - 多句对话") {
-    let s = AppState()
-    let e1 = TranslationEntry(
-        sentenceId: "1", speaker: "interviewer", timestamp: "12:00:01",
-        original: "Tell me about yourself.",
-        stableText: "Tell me about yourself.", tentativeText: "",
-        translation: "请简单介绍一下你自己。",
-        isTranscriptFinal: true, isTranslationComplete: true
-    )
-    let e2 = TranslationEntry(
-        sentenceId: "2", speaker: "me", timestamp: "12:00:08",
-        original: "Sure, I'm a software engineer.",
-        stableText: "Sure, I'm a software engineer.", tentativeText: "",
-        translation: "好的，我是一名软件工程师。",
-        isTranscriptFinal: true, isTranslationComplete: true
-    )
-    let e3 = TranslationEntry(
-        sentenceId: "3", speaker: "interviewer", timestamp: "12:00:15",
-        original: "What's your favorite project",
-        stableText: "What's your favorite", tentativeText: "project",
-        translation: "你最喜欢的",
-        isTranscriptFinal: false, isTranslationComplete: false
-    )
-    s.translations = [e1, e2, e3]
-    s.selectedSentenceId = "3"
-    return CaptionsView(appState: s)
-        .frame(width: 480, height: 240)
+    let s: AppState = {
+        let s = AppState()
+        let e1 = TranslationEntry(
+            sentenceId: "1", speaker: "interviewer", timestamp: "12:00:01",
+            original: "Tell me about yourself.",
+            stableText: "Tell me about yourself.", tentativeText: "",
+            translation: "请简单介绍一下你自己。",
+            isTranscriptFinal: true, isTranslationComplete: true
+        )
+        let e2 = TranslationEntry(
+            sentenceId: "2", speaker: "me", timestamp: "12:00:08",
+            original: "Sure, I'm a software engineer.",
+            stableText: "Sure, I'm a software engineer.", tentativeText: "",
+            translation: "好的，我是一名软件工程师。",
+            isTranscriptFinal: true, isTranslationComplete: true
+        )
+        let e3 = TranslationEntry(
+            sentenceId: "3", speaker: "interviewer", timestamp: "12:00:15",
+            original: "What's your favorite project",
+            stableText: "What's your favorite", tentativeText: "project",
+            translation: "你最喜欢的",
+            isTranscriptFinal: false, isTranslationComplete: false
+        )
+        s.translations = [e1, e2, e3]
+        s.selectedSentenceId = "3"
+        return s
+    }()
+    ZStack {
+        Theme.panelBaseSolid
+        CaptionsView(appState: s)
+    }
+    .frame(width: 480, height: 240)
 }

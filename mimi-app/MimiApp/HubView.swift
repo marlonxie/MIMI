@@ -62,7 +62,6 @@ struct HubView: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
-        .background(Theme.panelBackground)
     }
 }
 
@@ -84,11 +83,12 @@ private struct HubButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: icon)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 14, weight: .regular))   // iOS Symbol 默认更轻
                 .foregroundStyle(foreground)
-                .frame(width: 30, height: 26)
+                .frame(width: 32, height: 28)
                 .background(background)
-                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.button,
+                                            style: .continuous))
         }
         .buttonStyle(.plain)
         .help(tooltip)
@@ -97,19 +97,19 @@ private struct HubButton: View {
     private var foreground: Color {
         switch (tone, active) {
         case (.accent, true):   return .white
-        case (.accent, false):  return Theme.interviewerAccent
-        case (.neutral, _):     return Theme.textPrimary
-        case (.danger, _):      return Color(red: 1.0, green: 0.45, blue: 0.45)
+        case (.accent, false):  return Theme.labelSecondary
+        case (.neutral, _):     return Theme.labelSecondary
+        case (.danger, _):      return Theme.systemRed
         }
     }
 
-    /// 仅 active 状态有底色；常态完全透明（"按钮没点击的时候不要有边框"）
+    /// 仅 active 才有底色；inactive 透明（"未点击无边框"）
     private var background: Color {
         guard active else { return .clear }
         switch tone {
-        case .accent:  return Theme.interviewerAccent.opacity(0.85)
-        case .neutral: return Color.white.opacity(0.10)
-        case .danger:  return Color(red: 0.85, green: 0.30, blue: 0.30)
+        case .accent:  return Theme.systemBlue
+        case .neutral: return Theme.fillSecondary
+        case .danger:  return Theme.systemRed.opacity(0.85)
         }
     }
 }
@@ -117,15 +117,18 @@ private struct HubButton: View {
 private struct HubDivider: View {
     var body: some View {
         Rectangle()
-            .fill(Color.white.opacity(0.10))
-            .frame(width: 1, height: 16)
+            .fill(Theme.separator)
+            .frame(width: 1, height: 18)
             .padding(.horizontal, 2)
     }
 }
 
 #Preview("hub - 全关") {
-    HubView(appState: AppState(), appDelegate: AppDelegate())
-        .frame(width: 320, height: 40)
+    ZStack {
+        Theme.panelBaseSolid
+        HubView(appState: AppState(), appDelegate: AppDelegate())
+    }
+    .frame(width: 320, height: 40)
 }
 
 #Preview("hub - 字幕开 + 麦克风开") {
@@ -137,6 +140,9 @@ private struct HubDivider: View {
         s.suggestionVisible = false
         return s
     }()
-    HubView(appState: s, appDelegate: AppDelegate())
-        .frame(width: 320, height: 40)
+    ZStack {
+        Theme.panelBaseSolid
+        HubView(appState: s, appDelegate: AppDelegate())
+    }
+    .frame(width: 320, height: 40)
 }
