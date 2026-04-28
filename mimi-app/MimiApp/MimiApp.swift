@@ -1,4 +1,6 @@
 import SwiftUI
+import AppKit
+import UniformTypeIdentifiers
 
 @main
 struct MimiApp: App {
@@ -20,54 +22,186 @@ struct MimiApp: App {
     }
 }
 
-// MARK: - App Delegate (管理悬浮窗)
+// MARK: - App Delegate（管理 hub + captions + suggestion 三个浮动 panel）
 
 @MainActor
 class AppDelegate: NSObject, NSApplicationDelegate {
-    var overlayPanel: NSPanel?
-    var appState: AppState?
+    var hubPanel: NSPanel?
+    var captionsPanel: NSPanel?
+    var suggestionPanel: NSPanel?
+    weak var appState: AppState?
 
-    func showOverlay(appState: AppState) {
+    /// 创建（如未创建）+ 显示三个 panel。AppState 的 captionsVisible/suggestionVisible 决定子窗是否一同打开。
+    func showAllPanels(appState: AppState) {
         self.appState = appState
+        appState.appDelegate = self
 
-        if let panel = overlayPanel {
-            panel.level = .floating
-            panel.makeKeyAndOrderFront(nil)
-            return
+        if hubPanel == nil {
+            hubPanel = makeFloatingPanel(
+                autosaveName: "MIMI.Hub",
+                defaultRect: NSRect(x: 0, y: 0, width: 480, height: 50),
+                rootView: AnyView(HubView(appState: appState, appDelegate: self))
+            )
+        }
+        if captionsPanel == nil {
+            captionsPanel = makeFloatingPanel(
+                autosaveName: "MIMI.Captions",
+                defaultRect: NSRect(x: 0, y: 0, width: 480, height: 240),
+                rootView: AnyView(CaptionsView(appState: appState))
+            )
+        }
+        if suggestionPanel == nil {
+            suggestionPanel = makeFloatingPanel(
+                autosaveName: "MIMI.Suggestion",
+                defaultRect: NSRect(x: 0, y: 0, width: 480, height: 200),
+                rootView: AnyView(SuggestionView(appState: appState))
+            )
+        }
+        applyDefaultLayoutIfNeeded()
+        installNotificationsOnce()
+
+        hubPanel?.makeKeyAndOrderFront(nil)
+        applyCaptionsVisibility(appState.captionsVisible)
+        applySuggestionVisibility(appState.suggestionVisible)
+    }
+
+    // MARK: 显示 / 最小化 / 关闭
+
+    func applyCaptionsVisibility(_ visible: Bool) {
+        guard let panel = captionsPanel else { return }
+        if visible, !panel.isVisible { panel.orderFront(nil) }
+        else if !visible, panel.isVisible { panel.orderOut(nil) }
+    }
+
+    func applySuggestionVisibility(_ visible: Bool) {
+        guard let panel = suggestionPanel else { return }
+        if visible, !panel.isVisible { panel.orderFront(nil) }
+        else if !visible, panel.isVisible { panel.orderOut(nil) }
+    }
+
+    /// 临时隐藏全部窗口（保留录音）。菜单栏"隐藏悬浮窗" + Hub minus 按钮共用。
+    func minimizeAll() {
+        hubPanel?.orderOut(nil)
+        captionsPanel?.orderOut(nil)
+        suggestionPanel?.orderOut(nil)
+        // 不动 captionsVisible / suggestionVisible（临时态，不持久化）
+    }
+
+    /// 从最小化恢复。按 *Visible 状态决定子窗是否随 hub 一起出现。
+    func restoreAll() {
+        guard let appState else { return }
+        hubPanel?.makeKeyAndOrderFront(nil)
+        applyCaptionsVisibility(appState.captionsVisible)
+        applySuggestionVisibility(appState.suggestionVisible)
+    }
+
+    /// 当前是否处于"全部隐藏"状态（菜单栏 toggle 文字依据此）
+    var isAllHidden: Bool {
+        !(hubPanel?.isVisible ?? false)
+    }
+
+    // MARK: 上传 RAG 资料
+
+    /// NSOpenPanel 选文件 → 复制到 mimi-backend/resources/
+    /// 本轮不自动触发 indexer（让用户手动 `python -m rag.indexer`）；下轮做自动
+    func pickRagResources() {
+        let panel = NSOpenPanel()
+        panel.title = "选择简历 / 项目说明文件"
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [.pdf, .plainText, .text]
+
+        guard panel.runModal() == .OK else { return }
+
+        let resources = URL(fileURLWithPath: "/Users/marlon/MIMI/mimi-backend/resources")
+        try? FileManager.default.createDirectory(at: resources, withIntermediateDirectories: true)
+
+        var copied = 0
+        for src in panel.urls {
+            let dst = resources.appendingPathComponent(src.lastPathComponent)
+            // 已存在则覆盖
+            try? FileManager.default.removeItem(at: dst)
+            do {
+                try FileManager.default.copyItem(at: src, to: dst)
+                copied += 1
+            } catch {
+                print("复制文件失败: \(src.lastPathComponent) — \(error)")
+            }
         }
 
+        let alert = NSAlert()
+        alert.messageText = "已复制 \(copied) 个文件到 resources/"
+        alert.informativeText = "请运行：\ncd mimi-backend && python -m rag.indexer\n重建索引后回答提示功能才会用到新资料。"
+        alert.runModal()
+    }
+
+    // MARK: Panel 创建
+
+    private func makeFloatingPanel(
+        autosaveName: String,
+        defaultRect: NSRect,
+        rootView: AnyView
+    ) -> NSPanel {
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 500, height: 450),
+            contentRect: defaultRect,
             styleMask: [.titled, .closable, .resizable, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
-        panel.title = "MIMI 面试助手"
+        panel.title = ""
         panel.level = .floating
         panel.isFloatingPanel = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.isMovableByWindowBackground = true
-        panel.backgroundColor = NSColor(white: 0, alpha: 0.85)
+        panel.backgroundColor = NSColor(white: 0, alpha: 0)   // 透明，由 SwiftUI Theme 背景填充
         panel.isOpaque = false
         panel.titlebarAppearsTransparent = true
         panel.titleVisibility = .hidden
+        panel.hidesOnDeactivate = false
+        panel.contentView = NSHostingView(rootView: rootView)
+        panel.setFrameAutosaveName(autosaveName)
+        // 注：setFrameUsingName 会被 setFrameAutosaveName 自动调用一次
+        return panel
+    }
 
-        if let screen = NSScreen.main {
-            let x = screen.frame.width - 520
-            let y = screen.frame.height - 500
-            panel.setFrameOrigin(NSPoint(x: x, y: y))
+    /// 首次启动 / panel 没历史位置时，按 hub→captions→suggestion 垂直堆叠到屏幕右上
+    private func applyDefaultLayoutIfNeeded() {
+        guard let screen = NSScreen.main,
+              let hub = hubPanel,
+              let caps = captionsPanel,
+              let sug = suggestionPanel else { return }
+
+        // setFrameAutosaveName 已自动恢复历史位置；如还在 (0,0) 视为首次
+        if hub.frame.origin == .zero {
+            let w: CGFloat = 480
+            let hubH: CGFloat = 50
+            let capsH: CGFloat = 240
+            let sugH: CGFloat = 200
+            let gap: CGFloat = 4
+            let x = screen.visibleFrame.maxX - w - 20
+            var y = screen.visibleFrame.maxY - hubH - 20
+            hub.setFrame(NSRect(x: x, y: y, width: w, height: hubH), display: true)
+            y -= capsH + gap
+            caps.setFrame(NSRect(x: x, y: y, width: w, height: capsH), display: true)
+            y -= sugH + gap
+            sug.setFrame(NSRect(x: x, y: y, width: w, height: sugH), display: true)
         }
+    }
 
-        // 只创建一次 — @Observable appState 自动驱动 SwiftUI 更新
-        let hostingView = NSHostingView(
-            rootView: OverlayWindowContent(appState: appState)
+    // MARK: 通知
+
+    private var notificationsInstalled = false
+
+    private func installNotificationsOnce() {
+        guard !notificationsInstalled else { return }
+        notificationsInstalled = true
+
+        // 子窗 / Hub 关闭事件
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(panelWillClose(_:)),
+            name: NSWindow.willCloseNotification, object: nil
         )
-        panel.contentView = hostingView
-        panel.makeKeyAndOrderFront(nil)
-        overlayPanel = panel
-
-        // 当应用内其他窗口（如 Settings）变 key 时，临时把悬浮窗降到 normal 层；
-        // 对方关闭 / 失焦再回到 floating。否则 .floating(3) 会挡住 Settings(.normal=0)。
+        // Settings 等其他窗口出现时让位
         NotificationCenter.default.addObserver(
             self, selector: #selector(otherWindowBecameKey(_:)),
             name: NSWindow.didBecomeKeyNotification, object: nil
@@ -78,24 +212,30 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
+    @objc func panelWillClose(_ notif: Notification) {
+        guard let p = notif.object as? NSPanel else { return }
+        if p === hubPanel {
+            // Hub 红圈关 == 退出 app
+            NSApp.terminate(nil)
+        } else if p === captionsPanel {
+            appState?.captionsVisible = false
+        } else if p === suggestionPanel {
+            appState?.suggestionVisible = false
+        }
+    }
+
     @objc func otherWindowBecameKey(_ notif: Notification) {
-        guard let w = notif.object as? NSWindow,
-              let panel = overlayPanel,
-              w !== panel else { return }
-        panel.level = .normal  // 让位，让 Settings 等能显示在上方
+        guard let w = notif.object as? NSWindow else { return }
+        let myPanels: [NSPanel?] = [hubPanel, captionsPanel, suggestionPanel]
+        if myPanels.contains(where: { $0 === w }) { return }
+        myPanels.compactMap { $0 }.forEach { $0.level = .normal }
     }
 
     @objc func otherWindowResignedKey(_ notif: Notification) {
-        guard let w = notif.object as? NSWindow,
-              let panel = overlayPanel,
-              w !== panel else { return }
-        // 其他窗口失焦 → 恢复浮动（面试中保持字幕在面试视频上方）
-        panel.level = .floating
-    }
-
-    func hideOverlay() {
-        overlayPanel?.close()
-        overlayPanel = nil
+        guard let w = notif.object as? NSWindow else { return }
+        let myPanels: [NSPanel?] = [hubPanel, captionsPanel, suggestionPanel]
+        if myPanels.contains(where: { $0 === w }) { return }
+        myPanels.compactMap { $0 }.forEach { $0.level = .floating }
     }
 }
 
@@ -108,8 +248,12 @@ struct MenuBarView: View {
 
     var body: some View {
         VStack {
-            Button("打开悬浮窗") {
-                appDelegate.showOverlay(appState: appState)
+            Button(appDelegate.isAllHidden ? "显示悬浮窗" : "隐藏悬浮窗") {
+                if appDelegate.isAllHidden {
+                    appDelegate.showAllPanels(appState: appState)
+                } else {
+                    appDelegate.minimizeAll()
+                }
             }
 
             Divider()
@@ -140,8 +284,6 @@ struct MenuBarView: View {
             }
 
             Button("设置…") {
-                // MenuBarExtra 下 SettingsLink 偶尔只创建窗口不激活；
-                // 显式 activate + openSettings 更可靠
                 NSApp.activate(ignoringOtherApps: true)
                 openSettings()
             }
@@ -198,27 +340,38 @@ class AppState {
         }
     }
 
+    // === Hub 子窗可见性（持久化 + 联动 AppDelegate）===
+    var captionsVisible: Bool = (UserDefaults.standard.object(forKey: "captionsVisible") as? Bool) ?? true {
+        didSet {
+            UserDefaults.standard.set(captionsVisible, forKey: "captionsVisible")
+            appDelegate?.applyCaptionsVisibility(captionsVisible)
+        }
+    }
+    var suggestionVisible: Bool = (UserDefaults.standard.object(forKey: "suggestionVisible") as? Bool) ?? true {
+        didSet {
+            UserDefaults.standard.set(suggestionVisible, forKey: "suggestionVisible")
+            appDelegate?.applySuggestionVisibility(suggestionVisible)
+        }
+    }
+
     // === API key / LLM provider ===
-    // llmProvider 持久化在 UserDefaults；apiKey 仅运行内存（持久化走 Keychain）
     var llmProvider: String = UserDefaults.standard.string(forKey: "llmProvider") ?? "gemini" {
         didSet { UserDefaults.standard.set(llmProvider, forKey: "llmProvider") }
     }
-    var apiKey: String = ""              // SettingsView 双向绑定
-    var translationReady: Bool = false   // 后端 status / api_keys_ack 更新
-    var ragReady: Bool = false           // 同上
-    var ragLoaded: Bool = false          // 后端是否加载了 RAG（无索引则 false）
+    var apiKey: String = ""
+    var translationReady: Bool = false
+    var ragReady: Bool = false
+    var ragLoaded: Bool = false
 
     let wsClient = WebSocketClient()
     let audioCapture = AudioCaptureManager()
+    weak var appDelegate: AppDelegate?
 
     init() {
         setupCallbacks()
-        // 不在 init 时自动连接，等用户点开始录音
     }
 
     func startCapture() async {
-        // 初始化消息推到 onConnect callback 里发，避免 connect 异步建连期间被
-        // sendJSON 的 isConnected 守卫丢弃
         wsClient.connect()
         do {
             try await audioCapture.startCapture()
@@ -250,12 +403,10 @@ class AppState {
         isCapturing = false
     }
 
-    /// 两步点击交互第一步：高亮某条 interviewer 字幕行，让 💡 按钮出现
     func selectSentence(_ sentenceId: String?) {
         selectedSentenceId = sentenceId
     }
 
-    /// 两步点击第二步：对选中句触发 RAG 建议生成
     func requestSuggestion(sentenceId: String) {
         guard wsClient.isConnected else { return }
         isGeneratingSuggestion = true
@@ -280,7 +431,7 @@ class AppState {
     func toggleSystemAudio() async {
         if isSystemAudioEnabled {
             audioCapture.stopSystemAudioCapture()
-            isSystemAudioEnabled = false  // stop 是异步 task，立即翻转 UI 状态
+            isSystemAudioEnabled = false
         } else {
             do {
                 try await audioCapture.startSystemAudioCapture()
@@ -299,25 +450,20 @@ class AppState {
 
     private func setupCallbacks() {
         audioCapture.onAudioChunk = { [weak self] data, source in
-            // source 嵌入音频消息本身（前缀字节），不再用 sendConfig 切换
             self?.wsClient.sendAudio(data, source: source)
         }
 
         wsClient.onTranscript = { [weak self] msg in
             guard let self else { return }
-            // partial 升级 final 时 tentative 段清空（final 没有候选段）
-            // 旧 server 不发新字段时 fallback：整段当 stable
             let stable = msg.stableText ?? msg.text
             let tentative = msg.isFinal ? "" : (msg.tentativeText ?? "")
 
             if let existing = self.translations.first(where: { $0.id == msg.sentenceId }) {
-                // 已有 entry — 原地更新（partial → final，或 partial 文字变化）
                 existing.original = msg.text
                 existing.stableText = stable
                 existing.tentativeText = tentative
                 existing.isTranscriptFinal = msg.isFinal
             } else {
-                // 新 entry
                 let entry = TranslationEntry(
                     sentenceId: msg.sentenceId,
                     speaker: msg.speaker,
@@ -327,7 +473,6 @@ class AppState {
                     tentativeText: tentative,
                     isTranscriptFinal: msg.isFinal
                 )
-                // insert_after: 多句拆分时，插入到指定 ID 后面（保持阅读顺序）
                 if let afterId = msg.insertAfter,
                    let idx = self.translations.firstIndex(where: { $0.id == afterId }) {
                     self.translations.insert(entry, at: idx + 1)
@@ -342,13 +487,12 @@ class AppState {
             if let entry = self.translations.first(where: { $0.id == msg.sentenceId }) {
                 entry.translation += msg.delta
             }
-            // 找不到就丢弃 — 正常情况下 transcript 总是先到
         }
 
         wsClient.onTranslationFinal = { [weak self] msg in
             guard let self else { return }
             if let entry = self.translations.first(where: { $0.id == msg.sentenceId }) {
-                entry.translation = msg.text  // 用完整文本覆盖，避免 delta 拼接误差
+                entry.translation = msg.text
                 entry.isTranslationComplete = true
             }
         }
@@ -364,7 +508,6 @@ class AppState {
             self.ragReady = msg.ragReady
             self.ragLoaded = msg.ragLoaded
             // 智能分流：仅在后端 not_ready && Keychain 有 key 时被动推送
-            // 已就绪时不推（避免老 Keychain 静默覆盖 .env 的 key）
             if !msg.translatorReady, let stored = Keychain.load(key: self.llmProvider) {
                 self.apiKey = stored
                 self.wsClient.sendApiKeys(provider: self.llmProvider, apiKey: stored)
@@ -384,7 +527,7 @@ class AppState {
             self.wsClient.sendLanguages(interview: self.interviewLanguage,
                                          native: self.nativeLanguage)
             self.wsClient.sendSuggestionEnabled(self.suggestionEnabled)
-            self.wsClient.sendQueryStatus()  // 让 onStatus 决定是否推 Keychain
+            self.wsClient.sendQueryStatus()
         }
     }
 }
