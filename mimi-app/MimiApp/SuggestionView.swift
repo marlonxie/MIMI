@@ -91,3 +91,45 @@ struct SuggestionView: View {
         .cornerRadius(6)
     }
 }
+
+// MARK: - Previews
+
+#Preview("suggestion - 缺 API key") {
+    let s = AppState()
+    s.translationReady = false
+    return SuggestionView(appState: s)
+        .frame(width: 480, height: 200)
+}
+
+#Preview("suggestion - 思考中") {
+    let s = AppState()
+    s.translationReady = true
+    s.ragLoaded = true
+    s.ragReady = true
+    s.isGeneratingSuggestion = true
+    return SuggestionView(appState: s)
+        .frame(width: 480, height: 200)
+}
+
+#Preview("suggestion - 三段式回答") {
+    let s = AppState()
+    s.translationReady = true
+    s.ragLoaded = true
+    s.ragReady = true
+    s.currentSuggestion = ParsedSuggestion(
+        understanding: "考察项目经历与团队协作",
+        keyPoints: "团队规模 → team size · 技术栈 → tech stack · 量化结果 → measurable impact",
+        sampleAnswer: "I led a 4-person team building a real-time STT pipeline. We cut latency from 1.8s to 600ms by switching to mlx-whisper and adding LocalAgreement-2 streaming."
+    )
+    return SuggestionView(appState: s)
+        .frame(width: 480, height: 200)
+}
+
+#Preview("suggestion - 默认占位") {
+    let s = AppState()
+    s.translationReady = true
+    s.ragLoaded = true
+    s.ragReady = true
+    return SuggestionView(appState: s)
+        .frame(width: 480, height: 200)
+}

@@ -38,23 +38,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         if hubPanel == nil {
             hubPanel = makeFloatingPanel(
-                autosaveName: "MIMI.Hub",
-                defaultRect: NSRect(x: 0, y: 0, width: 480, height: 50),
-                rootView: AnyView(HubView(appState: appState, appDelegate: self))
+                autosaveName: "MIMI.Hub.v3",
+                defaultRect: NSRect(x: 0, y: 0, width: 320, height: 40),
+                rootView: AnyView(HubView(appState: appState, appDelegate: self)),
+                borderless: true   // hub 自带 minus / xmark，不要系统 traffic-light
             )
         }
         if captionsPanel == nil {
             captionsPanel = makeFloatingPanel(
-                autosaveName: "MIMI.Captions",
+                autosaveName: "MIMI.Captions.v2",
                 defaultRect: NSRect(x: 0, y: 0, width: 480, height: 240),
-                rootView: AnyView(CaptionsView(appState: appState))
+                rootView: AnyView(CaptionsView(appState: appState)),
+                borderless: false
             )
         }
         if suggestionPanel == nil {
             suggestionPanel = makeFloatingPanel(
-                autosaveName: "MIMI.Suggestion",
+                autosaveName: "MIMI.Suggestion.v2",
                 defaultRect: NSRect(x: 0, y: 0, width: 480, height: 200),
-                rootView: AnyView(SuggestionView(appState: appState))
+                rootView: AnyView(SuggestionView(appState: appState)),
+                borderless: false
             )
         }
         applyDefaultLayoutIfNeeded()
@@ -140,25 +143,43 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func makeFloatingPanel(
         autosaveName: String,
         defaultRect: NSRect,
-        rootView: AnyView
+        rootView: AnyView,
+        borderless: Bool
     ) -> NSPanel {
+        let style: NSWindow.StyleMask = borderless
+            ? [.borderless, .resizable, .nonactivatingPanel]
+            : [.titled, .closable, .resizable, .nonactivatingPanel]
         let panel = NSPanel(
             contentRect: defaultRect,
-            styleMask: [.titled, .closable, .resizable, .nonactivatingPanel],
+            styleMask: style,
             backing: .buffered,
             defer: false
         )
-        panel.title = ""
         panel.level = .floating
         panel.isFloatingPanel = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.isMovableByWindowBackground = true
-        panel.backgroundColor = NSColor(white: 0, alpha: 0)   // 透明，由 SwiftUI Theme 背景填充
         panel.isOpaque = false
-        panel.titlebarAppearsTransparent = true
-        panel.titleVisibility = .hidden
+        panel.hasShadow = true
         panel.hidesOnDeactivate = false
-        panel.contentView = NSHostingView(rootView: rootView)
+
+        if borderless {
+            // 完全交给 SwiftUI Theme.panelBackground 渲染背景 + 圆角
+            panel.backgroundColor = NSColor(white: 0, alpha: 0)
+            let host = NSHostingView(rootView: rootView)
+            host.wantsLayer = true
+            host.layer?.cornerRadius = 10
+            host.layer?.masksToBounds = true
+            panel.contentView = host
+        } else {
+            // 保留系统 traffic-light（红/黄/绿），但隐藏标题文字 + titlebar 半透明融入主背景
+            panel.title = ""
+            panel.titleVisibility = .hidden
+            panel.titlebarAppearsTransparent = true
+            // 关键：给 titlebar 一个非透明的底色，否则会透出桌面（用户上一版反馈的现象）
+            panel.backgroundColor = NSColor(deviceRed: 0.08, green: 0.10, blue: 0.13, alpha: 0.85)
+            panel.contentView = NSHostingView(rootView: rootView)
+        }
         panel.setFrameAutosaveName(autosaveName)
         // 注：setFrameUsingName 会被 setFrameAutosaveName 自动调用一次
         return panel
@@ -191,6 +212,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: 通知
 
     private var notificationsInstalled = false
+    private var isTerminating = false
 
     private func installNotificationsOnce() {
         guard !notificationsInstalled else { return }
@@ -213,9 +235,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func panelWillClose(_ notif: Notification) {
+        // 退出过程中所有 panel 都会收到 willClose；用 isTerminating 拦截，
+        // 避免误把 captions/suggestion 的"被动关闭"写成 visible=false 污染偏好
+        if isTerminating { return }
         guard let p = notif.object as? NSPanel else { return }
         if p === hubPanel {
-            // Hub 红圈关 == 退出 app
+            isTerminating = true
             NSApp.terminate(nil)
         } else if p === captionsPanel {
             appState?.captionsVisible = false
@@ -418,6 +443,7 @@ class AppState {
         if isMicrophoneEnabled {
             audioCapture.stopMicrophoneCapture()
         } else {
+            if !wsClient.isConnected { wsClient.connect() }
             do {
                 try await audioCapture.startMicrophoneCapture()
             } catch {
@@ -426,6 +452,7 @@ class AppState {
             }
         }
         isMicrophoneEnabled = audioCapture.isMicrophoneRunning
+        isCapturing = isMicrophoneEnabled || isSystemAudioEnabled
     }
 
     func toggleSystemAudio() async {
@@ -433,6 +460,7 @@ class AppState {
             audioCapture.stopSystemAudioCapture()
             isSystemAudioEnabled = false
         } else {
+            if !wsClient.isConnected { wsClient.connect() }
             do {
                 try await audioCapture.startSystemAudioCapture()
             } catch {
@@ -441,6 +469,7 @@ class AppState {
             }
             isSystemAudioEnabled = audioCapture.isSystemAudioRunning
         }
+        isCapturing = isMicrophoneEnabled || isSystemAudioEnabled
     }
 
     func cleanup() {

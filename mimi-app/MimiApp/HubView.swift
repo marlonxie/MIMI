@@ -1,102 +1,142 @@
 import SwiftUI
 import AppKit
 
-/// Hub palette：常用按钮聚集地。横排一行，作为主控面板的内容。
+/// Hub palette：常用按钮聚集地。纯图标，常态无底色，激活态才有圆角填充。
+/// 布局（左→右）：[关闭][最小化] | [mic][speaker] | [字幕][回答] | [上传][设置]
 struct HubView: View {
     @Bindable var appState: AppState
     let appDelegate: AppDelegate
     @Environment(\.openSettings) private var openSettings
 
     var body: some View {
-        HStack(spacing: 12) {
-            // 麦克风
-            Button { Task { await appState.toggleMicrophone() } } label: {
-                Image(systemName: appState.isMicrophoneEnabled ? "mic.fill" : "mic.slash.fill")
-                    .foregroundStyle(appState.isMicrophoneEnabled ? Theme.textPrimary : .red)
-                    .frame(width: 18, height: 18)
-            }.buttonStyle(.plain).help("麦克风")
+        HStack(spacing: 4) {
+            HubButton(icon: "xmark", tone: .danger, active: false, tooltip: "退出") {
+                NSApp.terminate(nil)
+            }
+            HubButton(icon: "minus", tone: .neutral, active: false, tooltip: "最小化") {
+                appDelegate.minimizeAll()
+            }
 
-            // 屏幕音频
-            Button { Task { await appState.toggleSystemAudio() } } label: {
-                Image(systemName: appState.isSystemAudioEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill")
-                    .foregroundStyle(appState.isSystemAudioEnabled ? Theme.textPrimary : .red)
-                    .frame(width: 18, height: 18)
-            }.buttonStyle(.plain).help("屏幕音频")
+            HubDivider()
 
-            Divider().frame(height: 14)
+            HubButton(
+                icon: appState.isMicrophoneEnabled ? "mic.fill" : "mic.slash.fill",
+                tone: .accent,
+                active: appState.isMicrophoneEnabled,
+                tooltip: "麦克风"
+            ) { Task { await appState.toggleMicrophone() } }
 
-            // 录音主开关
-            Button {
-                if appState.isCapturing {
-                    appState.stopCapture()
-                } else {
-                    Task { await appState.startCapture() }
-                }
-            } label: {
-                Image(systemName: appState.isCapturing ? "stop.circle.fill" : "record.circle")
-                    .foregroundStyle(appState.isCapturing ? .red : Theme.interviewerAccent)
-                    .frame(width: 18, height: 18)
-            }.buttonStyle(.plain).help(appState.isCapturing ? "停止录音" : "开始录音")
+            HubButton(
+                icon: appState.isSystemAudioEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill",
+                tone: .accent,
+                active: appState.isSystemAudioEnabled,
+                tooltip: "屏幕音频"
+            ) { Task { await appState.toggleSystemAudio() } }
 
-            Text(statusText)
-                .font(.caption)
-                .foregroundStyle(Theme.textSecondary)
+            HubDivider()
 
-            Spacer()
+            HubButton(
+                icon: "translate",
+                tone: .accent,
+                active: appState.captionsVisible,
+                tooltip: "字幕窗"
+            ) { appState.captionsVisible.toggle() }
 
-            // 子窗显示开关
-            Toggle("字幕", isOn: $appState.captionsVisible)
-                .toggleStyle(.button)
-                .controlSize(.small)
-            Toggle("回答", isOn: $appState.suggestionVisible)
-                .toggleStyle(.button)
-                .controlSize(.small)
+            HubButton(
+                icon: "sparkles",
+                tone: .accent,
+                active: appState.suggestionVisible,
+                tooltip: "回答提示窗"
+            ) { appState.suggestionVisible.toggle() }
 
-            Divider().frame(height: 14)
+            HubDivider()
 
-            // 上传 RAG 资料
-            Button { appDelegate.pickRagResources() } label: {
-                Image(systemName: "tray.and.arrow.down")
-                    .foregroundStyle(Theme.textPrimary)
-                    .frame(width: 18, height: 18)
-            }.buttonStyle(.plain).help("上传 RAG 资料")
+            HubButton(icon: "square.and.arrow.up", tone: .accent, active: false, tooltip: "上传 RAG 资料") {
+                appDelegate.pickRagResources()
+            }
 
-            // 设置
-            Button {
+            HubButton(icon: "gearshape.fill", tone: .accent, active: false, tooltip: "设置") {
                 NSApp.activate(ignoringOtherApps: true)
                 openSettings()
-            } label: {
-                Image(systemName: "gearshape")
-                    .foregroundStyle(Theme.textPrimary)
-                    .frame(width: 18, height: 18)
-            }.buttonStyle(.plain).help("设置")
-
-            // 最小化（== 菜单栏"隐藏悬浮窗"）
-            Button { appDelegate.minimizeAll() } label: {
-                Image(systemName: "minus.circle")
-                    .foregroundStyle(.yellow)
-                    .frame(width: 18, height: 18)
-            }.buttonStyle(.plain).help("最小化")
-
-            // 关闭 == 退出 app
-            Button { NSApp.terminate(nil) } label: {
-                Image(systemName: "xmark.circle")
-                    .foregroundStyle(.red)
-                    .frame(width: 18, height: 18)
-            }.buttonStyle(.plain).help("退出")
+            }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
         .background(Theme.panelBackground)
     }
+}
 
-    private var statusText: String {
-        if !appState.isCapturing { return "未录音" }
-        switch (appState.isMicrophoneEnabled, appState.isSystemAudioEnabled) {
-        case (true, true):   return "双路录音"
-        case (true, false):  return "仅麦克风"
-        case (false, true):  return "仅屏幕"
-        case (false, false): return "静音"
+// MARK: - Hub button primitives
+
+private enum HubTone {
+    case accent      // 蓝：常用功能
+    case neutral     // 白：弱化操作
+    case danger      // 红：关闭
+}
+
+private struct HubButton: View {
+    let icon: String
+    let tone: HubTone
+    let active: Bool
+    let tooltip: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(foreground)
+                .frame(width: 30, height: 26)
+                .background(background)
+                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .help(tooltip)
+    }
+
+    private var foreground: Color {
+        switch (tone, active) {
+        case (.accent, true):   return .white
+        case (.accent, false):  return Theme.interviewerAccent
+        case (.neutral, _):     return Theme.textPrimary
+        case (.danger, _):      return Color(red: 1.0, green: 0.45, blue: 0.45)
         }
     }
+
+    /// 仅 active 状态有底色；常态完全透明（"按钮没点击的时候不要有边框"）
+    private var background: Color {
+        guard active else { return .clear }
+        switch tone {
+        case .accent:  return Theme.interviewerAccent.opacity(0.85)
+        case .neutral: return Color.white.opacity(0.10)
+        case .danger:  return Color(red: 0.85, green: 0.30, blue: 0.30)
+        }
+    }
+}
+
+private struct HubDivider: View {
+    var body: some View {
+        Rectangle()
+            .fill(Color.white.opacity(0.10))
+            .frame(width: 1, height: 16)
+            .padding(.horizontal, 2)
+    }
+}
+
+#Preview("hub - 全关") {
+    HubView(appState: AppState(), appDelegate: AppDelegate())
+        .frame(width: 320, height: 40)
+}
+
+#Preview("hub - 字幕开 + 麦克风开") {
+    let s: AppState = {
+        let s = AppState()
+        s.isMicrophoneEnabled = true
+        s.isSystemAudioEnabled = false
+        s.captionsVisible = true
+        s.suggestionVisible = false
+        return s
+    }()
+    HubView(appState: s, appDelegate: AppDelegate())
+        .frame(width: 320, height: 40)
 }

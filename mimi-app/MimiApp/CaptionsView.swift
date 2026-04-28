@@ -136,3 +136,39 @@ struct TranslationRow: View {
         }
     }
 }
+
+// MARK: - Previews
+
+#Preview("captions - 空") {
+    CaptionsView(appState: AppState())
+        .frame(width: 480, height: 240)
+}
+
+#Preview("captions - 多句对话") {
+    let s = AppState()
+    let e1 = TranslationEntry(
+        sentenceId: "1", speaker: "interviewer", timestamp: "12:00:01",
+        original: "Tell me about yourself.",
+        stableText: "Tell me about yourself.", tentativeText: "",
+        translation: "请简单介绍一下你自己。",
+        isTranscriptFinal: true, isTranslationComplete: true
+    )
+    let e2 = TranslationEntry(
+        sentenceId: "2", speaker: "me", timestamp: "12:00:08",
+        original: "Sure, I'm a software engineer.",
+        stableText: "Sure, I'm a software engineer.", tentativeText: "",
+        translation: "好的，我是一名软件工程师。",
+        isTranscriptFinal: true, isTranslationComplete: true
+    )
+    let e3 = TranslationEntry(
+        sentenceId: "3", speaker: "interviewer", timestamp: "12:00:15",
+        original: "What's your favorite project",
+        stableText: "What's your favorite", tentativeText: "project",
+        translation: "你最喜欢的",
+        isTranscriptFinal: false, isTranslationComplete: false
+    )
+    s.translations = [e1, e2, e3]
+    s.selectedSentenceId = "3"
+    return CaptionsView(appState: s)
+        .frame(width: 480, height: 240)
+}
