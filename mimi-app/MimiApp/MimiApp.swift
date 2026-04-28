@@ -167,6 +167,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         panel.hidesOnDeactivate = false
         // 关键：让 NSVisualEffectView 透出磨砂；不再叠 SwiftUI 实色
         panel.backgroundColor = .clear
+        // 锁 dark vibrancy，无论系统外观如何，blur 都按深色 vibrancy 渲染
+        panel.appearance = NSAppearance(named: .vibrantDark)
 
         if !borderless {
             // 保留 traffic-light（红/黄/绿），但 titlebar 透明 + .fullSizeContentView
@@ -186,11 +188,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         let blur = NSVisualEffectView(frame: container.bounds)
         blur.autoresizingMask = [.width, .height]
-        blur.material = .hudWindow              // 通知中心风深色磨砂
+        blur.material = .hudWindow              // 通知中心风磨砂
         blur.blendingMode = .behindWindow
         blur.state = .active
         blur.isEmphasized = true
         container.addSubview(blur)
+
+        // 暗色 tint 蒙板：iOS systemMaterialDark 内部也是 blur + dark tint，
+        // 单独 .hudWindow 在浅色壁纸下会偏蓝偏亮，叠一层 ~0.45 alpha 黑压暗
+        let tint = NSView(frame: container.bounds)
+        tint.autoresizingMask = [.width, .height]
+        tint.wantsLayer = true
+        tint.layer?.backgroundColor = NSColor(white: 0, alpha: 0.45).cgColor
+        container.addSubview(tint)
 
         let host = NSHostingView(rootView: rootView)
         host.frame = container.bounds
