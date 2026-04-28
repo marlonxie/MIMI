@@ -7,6 +7,7 @@ python-dotenv>=1.1
 mlx-whisper>=0.4.3
 
 # LLM & RAG
+langchain>=1.0                # init_chat_model 工厂
 langchain-core>=1.2
 langchain-google-genai>=4.2
 langchain-anthropic>=1.4

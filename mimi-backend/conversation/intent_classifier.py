@@ -9,7 +9,7 @@
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
-from translation.langchain_translator import _create_llm
+from llm import LLMManager
 
 
 _LANG_NAMES = {"en": "English", "de": "German"}
@@ -52,13 +52,39 @@ def _parse_yes_no(resp: str) -> bool:
 
 
 class IntentClassifier:
-    """LLM 二分类器：face-value 面试发言 → 是否值得生成建议"""
+    """LLM 二分类器：face-value 面试发言 → 是否值得生成建议。
 
-    def __init__(self, provider: str, model_name: str):
-        self.llm = _create_llm(provider, model_name, temperature=0)
-        self.chain = INTENT_PROMPT | self.llm | StrOutputParser()
+    懒就绪：构造时若 LLMManager 已有 key，立刻 build chain；否则 chain=None。
+    `should_respond` 在 chain 未就绪时 fail-safe 返回 True（让 RAG 自己判，不阻塞流程）。
+    """
+
+    def __init__(self, llm_manager: LLMManager):
+        self.manager = llm_manager
+        self.llm = None
+        self.chain = None
+        self._try_build()
+
+    def _try_build(self) -> None:
+        self.llm = None
+        self.chain = None
+        if not self.manager.has_key():
+            return
+        try:
+            self.llm = self.manager.make_llm(temperature=0)
+            self.chain = INTENT_PROMPT | self.llm | StrOutputParser()
+        except Exception as e:
+            print(f"[intent] build failed: {e}")
+
+    def rebuild(self) -> None:
+        self._try_build()
+
+    @property
+    def is_ready(self) -> bool:
+        return self.chain is not None
 
     async def should_respond(self, text: str, context: str, language: str) -> bool:
+        if not self.is_ready:
+            return True  # 未就绪 fail-safe 放行
         try:
             resp = await self.chain.ainvoke({
                 "text": text,

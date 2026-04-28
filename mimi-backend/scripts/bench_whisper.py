@@ -9,7 +9,6 @@
 """
 
 import time
-import sys
 from pathlib import Path
 
 AUDIO_PATH = str(Path(__file__).parent.parent / "tests" / "test_audio.wav")

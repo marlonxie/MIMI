@@ -4,10 +4,13 @@ import Foundation
 @Observable
 class WebSocketClient {
     var isConnected = false
+    var onConnect: (@MainActor () -> Void)?     // 连接成功后触发；用来发初始化消息
     var onTranscript: (@MainActor (TranscriptMessage) -> Void)?
     var onTranslationDelta: (@MainActor (TranslationDeltaMessage) -> Void)?
     var onTranslationFinal: (@MainActor (TranslationFinalMessage) -> Void)?
     var onSuggestion: (@MainActor (SuggestionMessage) -> Void)?
+    var onStatus: (@MainActor (StatusMessage) -> Void)?
+    var onApiKeysAck: (@MainActor (ApiKeysAckMessage) -> Void)?
 
     private var webSocket: URLSessionWebSocketTask?
     private var session: URLSession?
@@ -28,6 +31,7 @@ class WebSocketClient {
                 self?.isConnected = true
                 self?.reconnectAttempts = 0
                 print("WebSocket 已连接")
+                self?.onConnect?()
             }
         } onClose: { [weak self] in
             Task { @MainActor in
@@ -73,6 +77,10 @@ class WebSocketClient {
     func sendManualSuggest(sentenceId: String) {
         sendJSON(ManualSuggestMessage(sentenceId: sentenceId))
     }
+    func sendApiKeys(provider: String, apiKey: String) {
+        sendJSON(ApiKeysMessage(provider: provider, apiKey: apiKey))
+    }
+    func sendQueryStatus() { sendJSON(StatusQueryMessage()) }
 
     // MARK: - Receive
 
@@ -124,6 +132,14 @@ class WebSocketClient {
         case "suggestion":
             if let msg = try? JSONDecoder().decode(SuggestionMessage.self, from: data) {
                 onSuggestion?(msg)
+            }
+        case "status":
+            if let msg = try? JSONDecoder().decode(StatusMessage.self, from: data) {
+                onStatus?(msg)
+            }
+        case "api_keys_ack":
+            if let msg = try? JSONDecoder().decode(ApiKeysAckMessage.self, from: data) {
+                onApiKeysAck?(msg)
             }
         default:
             break

@@ -144,7 +144,16 @@ struct OverlayWindowContent: View {
             .padding(.top, 8)
 
             ScrollView {
-                if let s = appState.currentSuggestion {
+                // 优先级：未就绪降级提示 > suggestion 内容 > 默认占位
+                if !appState.translationReady {
+                    apiKeyHint(reason: "启用翻译")
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 8)
+                } else if appState.ragLoaded && !appState.ragReady {
+                    apiKeyHint(reason: "启用 AI 回答提示")
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 8)
+                } else if let s = appState.currentSuggestion {
                     VStack(alignment: .leading, spacing: 8) {
                         if !s.understanding.isEmpty {
                             Text("📌 \(s.understanding)")
@@ -178,6 +187,27 @@ struct OverlayWindowContent: View {
             }
         }
         .frame(minHeight: 120)
+    }
+
+    /// 缺 API key 时的降级提示卡片（橙色 banner）
+    private func apiKeyHint(reason: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "key.fill")
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(reason)需配置 API key")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.white.opacity(0.9))
+                Text("打开 Settings (Cmd+,) → API")
+                    .font(.caption2)
+                    .foregroundColor(.gray)
+            }
+            Spacer()
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.18))
+        .cornerRadius(6)
     }
 }
 

@@ -5,7 +5,14 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).parent.parent.parent / ".env")
+from llm import LLMManager
 from translation.langchain_translator import Translator
+
+
+def _new_translator() -> Translator:
+    return Translator(LLMManager())
 
 
 async def test_stream_yields_chunks():
@@ -14,7 +21,7 @@ async def test_stream_yields_chunks():
     注意：Gemini 的流式 API 返回的是较大的文本块（~50 字符），不是 token 级。
     短句可能只有 1 个 chunk；长句应该有 ≥2 个。
     """
-    translator = Translator()
+    translator = _new_translator()
     long_text = (
         "Could you walk me through your experience designing and implementing "
         "distributed systems at scale? I am particularly interested in hearing "
@@ -34,7 +41,7 @@ async def test_stream_yields_chunks():
 
 async def test_stream_short_text():
     """测试：短文本至少产出 1 个 chunk"""
-    translator = Translator()
+    translator = _new_translator()
     chunks = []
     async for delta in translator.translate_stream(
         "Hello, how are you?", source_language="en"
@@ -46,7 +53,7 @@ async def test_stream_short_text():
 
 async def test_stream_empty_text():
     """测试：空文本应该产出零个 chunk"""
-    translator = Translator()
+    translator = _new_translator()
     chunks = []
     async for delta in translator.translate_stream("", source_language="en"):
         chunks.append(delta)
@@ -56,7 +63,7 @@ async def test_stream_empty_text():
 
 async def test_stream_with_context():
     """测试：带上下文的流式翻译"""
-    translator = Translator()
+    translator = _new_translator()
     context = (
         "[Interviewer] We use Kubernetes for orchestration.\n"
         "[Me] I have hands-on experience with that."

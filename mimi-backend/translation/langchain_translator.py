@@ -2,40 +2,10 @@
 
 import yaml
 from pathlib import Path
-from dotenv import load_dotenv
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
-# 加载 .env 文件中的环境变量（GOOGLE_API_KEY 等）
-load_dotenv(Path(__file__).parent.parent / ".env")
-
-
-# 支持的 LLM provider 和对应的 LangChain 类
-PROVIDER_MAP = {
-    "gemini": {
-        "module": "langchain_google_genai",
-        "class": "ChatGoogleGenerativeAI",
-        "env_key": "GOOGLE_API_KEY",
-    },
-    "claude": {
-        "module": "langchain_anthropic",
-        "class": "ChatAnthropic",
-        "env_key": "ANTHROPIC_API_KEY",
-    },
-}
-
-
-def _create_llm(provider: str, model: str, **kwargs):
-    """根据 provider 动态加载对应的 LangChain Chat 模型"""
-    import importlib
-
-    if provider not in PROVIDER_MAP:
-        raise ValueError(f"不支持的 provider: {provider}，可选: {list(PROVIDER_MAP.keys())}")
-
-    info = PROVIDER_MAP[provider]
-    mod = importlib.import_module(info["module"])
-    cls = getattr(mod, info["class"])
-    return cls(model=model, **kwargs)
+from llm import LLMManager
 
 
 # 翻译 prompt 模板（面试场景化）
@@ -108,26 +78,47 @@ TRANSLATE_PROMPT = ChatPromptTemplate.from_messages([
 
 
 class Translator:
-    """使用 LangChain LCEL 进行实时翻译，支持多 LLM 切换"""
+    """使用 LangChain LCEL 进行实时翻译，支持多 LLM 切换。
 
-    def __init__(self, config_path: str = None):
+    懒就绪（lazy ready）：构造时若 LLMManager 已有 key，立刻 build chain；
+    否则 chain=None，调用 translate_* 时优雅降级（return 空）。
+    LLMManager.set_key 后调 rebuild() 刷新 chain。
+    """
+
+    def __init__(self, llm_manager: LLMManager, config_path: str = None):
         if config_path is None:
             config_path = Path(__file__).parent.parent / "config.yaml"
         with open(config_path) as f:
             config = yaml.safe_load(f)
 
-        translator_config = config["translator"]
-        self.provider = translator_config["provider"]
-        self.model_name = translator_config["model"]
         # 用户母语 = 翻译输出语言（当前 prompt 硬编码英→中，切换其他 native 需同步改 prompt）
         self.native_language = config["user"]["native_language"]
 
-        # 创建 LLM 实例
-        # temperature=0：确定性输出。相同（text, context）产出相同翻译，用户体验更稳定
-        self.llm = _create_llm(self.provider, self.model_name, temperature=0)
+        self.manager = llm_manager
+        self.llm = None
+        self.chain = None
+        self._try_build()
 
-        # 构建 LCEL chain: prompt → llm → 解析为纯字符串
-        self.chain = TRANSLATE_PROMPT | self.llm | StrOutputParser()
+    def _try_build(self) -> None:
+        """LLMManager 有 key 时构建 chain，否则保持 None。"""
+        self.llm = None
+        self.chain = None
+        if not self.manager.has_key():
+            return
+        try:
+            # temperature=0：确定性输出。相同（text, context）产出相同翻译
+            self.llm = self.manager.make_llm(temperature=0)
+            self.chain = TRANSLATE_PROMPT | self.llm | StrOutputParser()
+        except Exception as e:
+            print(f"[translator] build failed: {e}")
+
+    def rebuild(self) -> None:
+        """LLMManager.set_key 后由 server.py 调一次。"""
+        self._try_build()
+
+    @property
+    def is_ready(self) -> bool:
+        return self.chain is not None
 
     def translate(self, text: str, source_language: str = None, context: str = "") -> dict:
         """
@@ -141,7 +132,7 @@ class Translator:
         Returns:
             {"original": str, "translation": str, "source_language": str}
         """
-        if not text or not text.strip():
+        if not self.is_ready or not text or not text.strip():
             return {
                 "original": text,
                 "translation": "",
@@ -165,7 +156,7 @@ class Translator:
 
         LangChain LCEL chain 原生支持 ainvoke
         """
-        if not text or not text.strip():
+        if not self.is_ready or not text or not text.strip():
             return {
                 "original": text,
                 "translation": "",
@@ -188,9 +179,9 @@ class Translator:
         流式翻译 — 逐 token 产出。yields str delta。
 
         LCEL chain `prompt | llm | StrOutputParser()` 原生支持 .astream()，
-        每个 chunk 是字符串增量。空文本返回空生成器。
+        每个 chunk 是字符串增量。空文本 / chain 未就绪时返回空生成器（优雅降级）。
         """
-        if not text or not text.strip():
+        if not self.is_ready or not text or not text.strip():
             return
 
         source_hint = self._get_source_hint(source_language)

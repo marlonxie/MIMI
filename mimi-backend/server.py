@@ -6,6 +6,7 @@ import numpy as np
 import yaml
 from contextlib import asynccontextmanager
 from pathlib import Path
+from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -15,7 +16,11 @@ from audio.stt_mlx import SpeechToText
 from conversation.history import SharedHistory
 from conversation.intent_classifier import IntentClassifier
 from conversation.question_filter import is_likely_filler
+from llm import LLMManager
 from translation.langchain_translator import Translator
+
+# 启动时加载 .env（开发者路径）；前端 Settings 推送的 key 走 set_api_keys 覆盖
+load_dotenv(Path(__file__).parent / ".env")
 
 # 加载配置
 config_path = Path(__file__).parent / "config.yaml"
@@ -25,9 +30,12 @@ with open(config_path) as f:
 # MLX Metal GPU 不支持并发推理 — 全局锁保证同一时刻只有一路 Whisper 在跑
 _whisper_lock = asyncio.Lock()
 
+# LLM 状态管理（缺 key 时不抛异常，组件懒就绪等 set_api_keys）
+llm_manager = LLMManager(default_provider=config["translator"]["provider"])
+
 # 初始化引擎（全局单例，所有连接共享）
 stt = SpeechToText(config_path)
-translator = Translator(config_path)
+translator = Translator(llm_manager, config_path)
 
 # RAG 引擎（可选，仅在有索引时加载）
 rag_engine = None
@@ -46,12 +54,12 @@ async def lifespan(app):
     if chroma_path.exists() and any(chroma_path.iterdir()):
         try:
             from rag.engine import RAGEngine
-            rag_engine = RAGEngine(config_path)
-            intent_classifier = IntentClassifier(
-                provider=config["translator"]["provider"],
-                model_name=config["translator"]["model"],
+            rag_engine = RAGEngine(llm_manager, config_path)
+            intent_classifier = IntentClassifier(llm_manager)
+            print(
+                f"RAG 引擎已加载，Intent classifier 已初始化"
+                f" (translator_ready={translator.is_ready}, rag_ready={rag_engine.is_ready})"
             )
-            print("RAG 引擎已加载，Intent classifier 已初始化")
         except Exception as e:
             print(f"RAG 引擎加载失败（跳过）: {e}")
     else:
@@ -163,11 +171,49 @@ async def websocket_endpoint(websocket: WebSocket):
                         "enabled": enable_suggestion,
                     })
 
+                elif msg_type == "set_api_keys":
+                    provider = data.get("provider", "gemini")
+                    api_key = data.get("api_key", "")
+                    if not api_key:
+                        await websocket.send_json({
+                            "type": "api_keys_error",
+                            "reason": "empty key",
+                        })
+                        continue
+                    was_translator_ready = translator.is_ready
+                    llm_manager.set_key(provider, api_key)
+                    translator.rebuild()
+                    if intent_classifier:
+                        intent_classifier.rebuild()
+                    if rag_engine:
+                        rag_engine.rebuild()
+                    if was_translator_ready:
+                        print(f"[api_keys] frontend override (was ready, switching to provider={provider})")
+                    else:
+                        print(f"[api_keys] received provider={provider}, translator_ready={translator.is_ready}")
+                    await websocket.send_json({
+                        "type": "api_keys_ack",
+                        "provider": provider,
+                        "translator_ready": translator.is_ready,
+                        "rag_ready": rag_engine.is_ready if rag_engine else False,
+                    })
+                    continue
+
+                elif msg_type == "query_status":
+                    await websocket.send_json({
+                        "type": "status",
+                        "active_provider": llm_manager.active_provider,
+                        "translator_ready": translator.is_ready,
+                        "rag_ready": rag_engine.is_ready if rag_engine else False,
+                        "rag_loaded": rag_engine is not None,
+                    })
+                    continue
+
                 elif msg_type == "manual_suggest":
-                    if not rag_engine:
+                    if not rag_engine or not rag_engine.is_ready:
                         await websocket.send_json({
                             "type": "suggestion_error",
-                            "reason": "RAG 未启用",
+                            "reason": "RAG 未启用或缺 API key",
                         })
                         continue
                     sentence_id = data.get("sentence_id", "")
@@ -211,7 +257,9 @@ async def websocket_endpoint(websocket: WebSocket):
                 asyncio.create_task(sources[speaker].handle_chunk(audio_data))
 
                 # === Auto suggestion pipeline (A: filter → B: intent → C: RAG) ===
-                if enable_suggestion and rag_engine and intent_classifier:
+                # 缺 api key 时（rag_engine.is_ready=False）跳过，避免空跑
+                if (enable_suggestion and rag_engine and rag_engine.is_ready
+                        and intent_classifier):
                     interviewer = sources["interviewer"]
                     if interviewer.last_triggered_sentences:
                         latest_sentence = interviewer.last_triggered_sentences[-1]

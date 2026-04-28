@@ -134,6 +134,62 @@ struct ManualSuggestMessage: Codable {
     }
 }
 
+// MARK: - API Key 协议消息
+
+struct ApiKeysMessage: Codable {
+    let type: String
+    let provider: String   // "gemini" | "claude"
+    let apiKey: String
+
+    init(provider: String, apiKey: String) {
+        self.type = "set_api_keys"
+        self.provider = provider
+        self.apiKey = apiKey
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case provider
+        case apiKey = "api_key"
+    }
+}
+
+struct ApiKeysAckMessage: Codable {
+    let type: String
+    let provider: String
+    let translatorReady: Bool
+    let ragReady: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case provider
+        case translatorReady = "translator_ready"
+        case ragReady = "rag_ready"
+    }
+}
+
+struct StatusQueryMessage: Codable {
+    let type: String
+
+    init() { self.type = "query_status" }
+}
+
+struct StatusMessage: Codable {
+    let type: String
+    let activeProvider: String
+    let translatorReady: Bool
+    let ragReady: Bool
+    let ragLoaded: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case activeProvider = "active_provider"
+        case translatorReady = "translator_ready"
+        case ragReady = "rag_ready"
+        case ragLoaded = "rag_loaded"
+    }
+}
+
 /// 三段式 suggestion 的客户端解析（按 📌 / 💡 / 🗣️ emoji 前缀拆分）。
 /// 后端 RAG prompt 强制输出这三段，前端在此分段便于 UI 分层渲染。
 struct ParsedSuggestion {

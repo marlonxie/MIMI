@@ -9,11 +9,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).parent.parent.parent / ".env")
+from llm import LLMManager
 from rag.engine import RAGEngine
 
 
 async def _run():
-    r = RAGEngine()
+    r = RAGEngine(LLMManager())
     result = await r.generate_suggestion(
         latest_text="Tell me about your distributed systems experience",
         interview_language="en",

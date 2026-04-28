@@ -198,6 +198,16 @@ class AppState {
         }
     }
 
+    // === API key / LLM provider ===
+    // llmProvider 持久化在 UserDefaults；apiKey 仅运行内存（持久化走 Keychain）
+    var llmProvider: String = UserDefaults.standard.string(forKey: "llmProvider") ?? "gemini" {
+        didSet { UserDefaults.standard.set(llmProvider, forKey: "llmProvider") }
+    }
+    var apiKey: String = ""              // SettingsView 双向绑定
+    var translationReady: Bool = false   // 后端 status / api_keys_ack 更新
+    var ragReady: Bool = false           // 同上
+    var ragLoaded: Bool = false          // 后端是否加载了 RAG（无索引则 false）
+
     let wsClient = WebSocketClient()
     let audioCapture = AudioCaptureManager()
 
@@ -207,11 +217,10 @@ class AppState {
     }
 
     func startCapture() async {
+        // 初始化消息推到 onConnect callback 里发，避免 connect 异步建连期间被
+        // sendJSON 的 isConnected 守卫丢弃
         wsClient.connect()
         do {
-            wsClient.sendConfig(source: "interviewer")
-            wsClient.sendLanguages(interview: interviewLanguage, native: nativeLanguage)
-            wsClient.sendSuggestionEnabled(suggestionEnabled)
             try await audioCapture.startCapture()
             isCapturing = true
             isMicrophoneEnabled = audioCapture.isMicrophoneRunning
@@ -219,6 +228,20 @@ class AppState {
         } catch {
             print("启动捕获失败: \(error)")
         }
+    }
+
+    /// 用户在 Settings 主动按"保存并应用"时调（强制推送，可覆盖 .env）
+    func applyApiKey() {
+        guard !apiKey.isEmpty else { return }
+        _ = Keychain.save(key: llmProvider, value: apiKey)
+        if wsClient.isConnected {
+            wsClient.sendApiKeys(provider: llmProvider, apiKey: apiKey)
+        }
+    }
+
+    /// SettingsView 切 provider 时调，自动从 Keychain 读对应 key 填到 UI
+    func loadApiKeyForCurrentProvider() {
+        apiKey = Keychain.load(key: llmProvider) ?? ""
     }
 
     func stopCapture() {
@@ -284,7 +307,7 @@ class AppState {
             guard let self else { return }
             // partial 升级 final 时 tentative 段清空（final 没有候选段）
             // 旧 server 不发新字段时 fallback：整段当 stable
-            let stable = msg.stableText ?? (msg.isFinal ? msg.text : msg.text)
+            let stable = msg.stableText ?? msg.text
             let tentative = msg.isFinal ? "" : (msg.tentativeText ?? "")
 
             if let existing = self.translations.first(where: { $0.id == msg.sentenceId }) {
@@ -333,6 +356,35 @@ class AppState {
         wsClient.onSuggestion = { [weak self] msg in
             self?.currentSuggestion = ParsedSuggestion.parseOrFallback(msg.suggestion)
             self?.isGeneratingSuggestion = false
+        }
+
+        wsClient.onStatus = { [weak self] msg in
+            guard let self else { return }
+            self.translationReady = msg.translatorReady
+            self.ragReady = msg.ragReady
+            self.ragLoaded = msg.ragLoaded
+            // 智能分流：仅在后端 not_ready && Keychain 有 key 时被动推送
+            // 已就绪时不推（避免老 Keychain 静默覆盖 .env 的 key）
+            if !msg.translatorReady, let stored = Keychain.load(key: self.llmProvider) {
+                self.apiKey = stored
+                self.wsClient.sendApiKeys(provider: self.llmProvider, apiKey: stored)
+            }
+        }
+
+        wsClient.onApiKeysAck = { [weak self] msg in
+            guard let self else { return }
+            self.translationReady = msg.translatorReady
+            self.ragReady = msg.ragReady
+        }
+
+        // 连接建立后才能可靠发消息（sendJSON 有 isConnected 守卫）
+        wsClient.onConnect = { [weak self] in
+            guard let self else { return }
+            self.wsClient.sendConfig(source: "interviewer")
+            self.wsClient.sendLanguages(interview: self.interviewLanguage,
+                                         native: self.nativeLanguage)
+            self.wsClient.sendSuggestionEnabled(self.suggestionEnabled)
+            self.wsClient.sendQueryStatus()  // 让 onStatus 决定是否推 Keychain
         }
     }
 }

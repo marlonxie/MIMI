@@ -2,17 +2,13 @@
 
 import yaml
 from pathlib import Path
-from dotenv import load_dotenv
 
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.runnables import RunnablePassthrough
 
-from translation.langchain_translator import _create_llm
-
-load_dotenv(Path(__file__).parent.parent / ".env")
+from llm import LLMManager
 
 LANG_MAP = {"en": "English", "de": "German"}
 NATIVE_LANG_MAP = {"zh": "中文", "en": "English"}
@@ -55,19 +51,22 @@ def _format_docs(docs) -> str:
 
 
 class RAGEngine:
-    """RAG 检索 + 回答提示生成"""
+    """RAG 检索 + 回答提示生成。
 
-    def __init__(self, config_path: str = None):
+    懒就绪：构造时若 LLMManager 已有 key，立刻 build answer_chain；否则 chain=None。
+    Embeddings + ChromaDB 不依赖 key（HuggingFace 本地模型），始终就绪。
+    """
+
+    def __init__(self, llm_manager: LLMManager, config_path: str = None):
         if config_path is None:
             config_path = Path(__file__).parent.parent / "config.yaml"
         with open(config_path) as f:
             config = yaml.safe_load(f)
 
         rag_config = config["rag"]
-        translator_config = config["translator"]
         chroma_path = str(Path(__file__).parent.parent / rag_config["chroma_path"])
 
-        # Embedding 模型（与 indexer 相同）
+        # Embedding 模型（与 indexer 相同），不依赖 api key
         self.embeddings = HuggingFaceEmbeddings(
             model_name=rag_config["embedding_model"],
             model_kwargs={"device": "cpu"},
@@ -90,15 +89,29 @@ class RAGEngine:
             },
         )
 
-        # LLM（复用 translator 的 provider 配置）
-        self.llm = _create_llm(
-            translator_config["provider"],
-            translator_config["model"],
-            temperature=0.5,
-        )
+        # LLM 部分懒就绪
+        self.manager = llm_manager
+        self.llm = None
+        self.answer_chain = None
+        self._try_build()
 
-        # LLM chain（不含 retriever，retriever 单独调用避免重复检索）
-        self.answer_chain = RAG_PROMPT | self.llm | StrOutputParser()
+    def _try_build(self) -> None:
+        self.llm = None
+        self.answer_chain = None
+        if not self.manager.has_key():
+            return
+        try:
+            self.llm = self.manager.make_llm(temperature=0.5)
+            self.answer_chain = RAG_PROMPT | self.llm | StrOutputParser()
+        except Exception as e:
+            print(f"[rag] build failed: {e}")
+
+    def rebuild(self) -> None:
+        self._try_build()
+
+    @property
+    def is_ready(self) -> bool:
+        return self.answer_chain is not None
 
     def _retrieve_and_format(self, query: str) -> tuple[str, list[str]]:
         """检索相关文档，返回 (格式化文本, 来源列表)"""
@@ -125,6 +138,9 @@ class RAGEngine:
         Returns:
             {"suggestion": str, "sources": list[str]}
         """
+        if not self.is_ready:
+            return {"suggestion": "", "sources": []}
+
         context, sources = self._retrieve_and_format(latest_text)
 
         suggestion = await self.answer_chain.ainvoke({
@@ -148,6 +164,9 @@ class RAGEngine:
         conversation_context: str = "",
     ) -> dict:
         """同步版本（用于测试）"""
+        if not self.is_ready:
+            return {"suggestion": "", "sources": []}
+
         context, sources = self._retrieve_and_format(latest_text)
 
         suggestion = self.answer_chain.invoke({

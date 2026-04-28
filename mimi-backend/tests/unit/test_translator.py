@@ -5,12 +5,20 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).parent.parent.parent / ".env")
+from llm import LLMManager
 from translation.langchain_translator import Translator
+
+
+def _new_translator() -> Translator:
+    """Test helper：复用单例 LLMManager（启动时从 .env 读 key）"""
+    return Translator(LLMManager())
 
 
 def test_translate_english():
     """测试：英语翻译"""
-    translator = Translator()
+    translator = _new_translator()
     result = translator.translate(
         "Tell me about a time when you had to deal with a difficult colleague.",
         source_language="en",
@@ -23,7 +31,7 @@ def test_translate_english():
 
 def test_translate_german():
     """测试：德语翻译"""
-    translator = Translator()
+    translator = _new_translator()
     result = translator.translate(
         "Erzählen Sie mir von Ihren Stärken und Schwächen.",
         source_language="de",
@@ -36,7 +44,7 @@ def test_translate_german():
 
 def test_translate_empty():
     """测试：空文本"""
-    translator = Translator()
+    translator = _new_translator()
     result = translator.translate("")
     print(f"空文本测试: translation='{result['translation']}'")
     assert result["translation"] == ""
@@ -44,7 +52,7 @@ def test_translate_empty():
 
 async def test_translate_async():
     """测试：异步翻译"""
-    translator = Translator()
+    translator = _new_translator()
     result = await translator.translate_async(
         "What is your greatest strength?", source_language="en"
     )
@@ -56,7 +64,7 @@ async def test_translate_async():
 
 def test_translate_with_context():
     """测试：带对话上下文的翻译"""
-    translator = Translator()
+    translator = _new_translator()
     context = (
         "[Interviewer] We use a microservices architecture here.\n"
         "[Me] I have experience with that approach."
@@ -75,7 +83,7 @@ def test_translate_with_context():
 
 def test_translate_empty_context():
     """测试：空上下文（传空字符串）"""
-    translator = Translator()
+    translator = _new_translator()
     result = translator.translate("Hello.", source_language="en", context="")
     print(f"空上下文测试: translation='{result['translation']}'")
     assert result["translation"]
@@ -87,7 +95,7 @@ def test_translate_empty_context():
 
 def test_preserve_tech_terms():
     """面试 prompt：技术名词应保留英文（不翻译成中文术语）。"""
-    translator = Translator()
+    translator = _new_translator()
     result = translator.translate(
         "I have three years of experience with React, TypeScript and Kubernetes.",
         source_language="en",
@@ -101,7 +109,7 @@ def test_preserve_tech_terms():
 
 def test_skip_filler_words():
     """面试 prompt：纯填充词应返回空或近空。"""
-    translator = Translator()
+    translator = _new_translator()
     result = translator.translate("Um, uh, like, you know.", source_language="en")
     translation = result["translation"].strip()
     print(f"填充词测试: translation='{translation}'")
@@ -111,7 +119,7 @@ def test_skip_filler_words():
 
 def test_short_response():
     """面试 prompt：简短应答应按语境意译。"""
-    translator = Translator()
+    translator = _new_translator()
     context = (
         "[Interviewer] We use microservices with gRPC.\n"
         "[Me] I'm familiar with that architecture."
@@ -133,7 +141,7 @@ def test_context_coreference():
 
     "I used it." 中的 "it" 在不同上下文下应指向不同对象。
     """
-    translator = Translator()
+    translator = _new_translator()
     context = (
         "[Interviewer] Have you worked with Kubernetes before?\n"
         "[Me] Yes, at my previous company."
@@ -157,7 +165,7 @@ def test_context_disambiguates_short_response():
 
     验证 context 真的被模型读取并影响翻译，而不是机械映射。
     """
-    translator = Translator()
+    translator = _new_translator()
 
     # 场景 A：回答"你会不会"类问题 → 应该翻成肯定回答
     context_a = "[Interviewer] Do you know JavaScript?"
@@ -186,7 +194,7 @@ def test_context_preserves_tech_terminology():
 
     即使上下文和当前输入都含术语，翻译也应该都保留。
     """
-    translator = Translator()
+    translator = _new_translator()
     context = (
         "[Interviewer] We're migrating from Docker Compose to Kubernetes.\n"
         "[Me] That's a big change."
@@ -205,7 +213,7 @@ def test_context_preserves_tech_terminology():
 
 def test_context_mixed_language():
     """上下文：中英混合上下文下，英文当前句仍正常翻译。"""
-    translator = Translator()
+    translator = _new_translator()
     context = (
         "[Interviewer] 你用过 React 吗？\n"
         "[Me] 用过，做过几个前端项目。"

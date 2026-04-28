@@ -176,7 +176,12 @@ async def stream_translation(
     sentence_id: str,
     translator,
 ):
-    """后台协程：流式推翻译 delta + final。"""
+    """后台协程：流式推翻译 delta + final。
+
+    translator 未就绪（缺 api key）时直接早返回，前端字幕翻译列保持空。
+    """
+    if not translator.is_ready:
+        return
     try:
         context = shared_history.get_context_window()
         full_translation = ""

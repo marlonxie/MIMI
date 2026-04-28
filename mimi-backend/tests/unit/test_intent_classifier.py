@@ -10,8 +10,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-import yaml
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).parent.parent.parent / ".env")
 from conversation.intent_classifier import IntentClassifier
+from llm import LLMManager
 
 
 CLEAR_YES_EN = [
@@ -31,13 +33,7 @@ CLEAR_NO_EN = [
 
 
 def _load_classifier() -> IntentClassifier:
-    config_path = Path(__file__).parent.parent.parent / "config.yaml"
-    with open(config_path) as f:
-        config = yaml.safe_load(f)
-    return IntentClassifier(
-        provider=config["translator"]["provider"],
-        model_name=config["translator"]["model"],
-    )
+    return IntentClassifier(LLMManager())
 
 
 async def _run():
