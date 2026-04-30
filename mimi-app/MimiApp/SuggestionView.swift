@@ -7,14 +7,14 @@ struct SuggestionView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
-                Text("回答提示")
+                Text(appState.t("suggestion.header"))
                     .font(Theme.headerFont)
                     .foregroundColor(Theme.labelSecondary)
                 if appState.isGeneratingSuggestion {
                     ProgressView()
                         .scaleEffect(0.5)
                         .frame(width: 14, height: 14)
-                    Text("思考中…")
+                    Text(appState.t("suggestion.thinking"))
                         .font(.caption2)
                         .foregroundColor(Theme.labelTertiary)
                 }
@@ -25,31 +25,31 @@ struct SuggestionView: View {
 
             ScrollView {
                 if !appState.translationReady {
-                    apiKeyHint(reason: "启用翻译")
+                    apiKeyHint(reason: appState.t("apiKey.reason.translation"))
                         .padding(.horizontal, 12)
                         .padding(.bottom, 8)
                 } else if appState.ragLoaded && !appState.ragReady {
-                    apiKeyHint(reason: "启用 AI 回答提示")
+                    apiKeyHint(reason: appState.t("apiKey.reason.rag"))
                         .padding(.horizontal, 12)
                         .padding(.bottom, 8)
                 } else if let s = appState.currentSuggestion {
                     VStack(alignment: .leading, spacing: 0) {
                         if !s.understanding.isEmpty {
-                            section(header: "理解",
+                            section(header: appState.t("suggestion.section.understanding"),
                                     body: s.understanding,
                                     color: Theme.labelPrimary,
                                     weight: .medium)
                         }
                         if !s.keyPoints.isEmpty {
                             sectionDivider()
-                            section(header: "要点",
+                            section(header: appState.t("suggestion.section.keyPoints"),
                                     body: s.keyPoints,
                                     color: Theme.systemOrange,
                                     weight: .regular)
                         }
                         if !s.sampleAnswer.isEmpty {
                             sectionDivider()
-                            section(header: "示例回答",
+                            section(header: appState.t("suggestion.section.sampleAnswer"),
                                     body: s.sampleAnswer,
                                     color: Theme.labelSecondary,
                                     weight: .regular)
@@ -58,7 +58,7 @@ struct SuggestionView: View {
                     .padding(.horizontal, 12)
                     .padding(.bottom, 8)
                 } else {
-                    Text("点击面试官字幕行 → 点击 💡 生成建议；或等待自动触发…")
+                    Text(appState.t("suggestion.placeholder"))
                         .font(.system(size: 12))
                         .foregroundColor(Theme.labelTertiary)
                         .padding(.horizontal, 12)
@@ -102,10 +102,10 @@ struct SuggestionView: View {
                 .foregroundStyle(Theme.systemOrange)
                 .frame(width: 20)
             VStack(alignment: .leading, spacing: 2) {
-                Text("\(reason)需配置 API key")
+                Text(String(format: appState.t("apiKey.banner.title"), reason))
                     .font(.system(size: 13, weight: .medium))
                     .foregroundColor(Theme.labelPrimary)
-                Text("打开 Settings (Cmd+,) → API")
+                Text(appState.t("apiKey.banner.subtitle"))
                     .font(.caption2)
                     .foregroundColor(Theme.labelSecondary)
             }

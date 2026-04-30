@@ -10,10 +10,12 @@ struct HubView: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            HubButton(icon: "xmark", tone: .danger, active: false, tooltip: "退出") {
+            HubButton(icon: "xmark", tone: .danger, active: false,
+                      tooltip: appState.t("hub.quit")) {
                 NSApp.terminate(nil)
             }
-            HubButton(icon: "minus", tone: .neutral, active: false, tooltip: "最小化") {
+            HubButton(icon: "minus", tone: .neutral, active: false,
+                      tooltip: appState.t("hub.minimize")) {
                 appDelegate.minimizeAll()
             }
 
@@ -23,14 +25,14 @@ struct HubView: View {
                 icon: appState.isMicrophoneEnabled ? "mic.fill" : "mic.slash.fill",
                 tone: .accent,
                 active: appState.isMicrophoneEnabled,
-                tooltip: "麦克风"
+                tooltip: appState.t("hub.mic")
             ) { Task { await appState.toggleMicrophone() } }
 
             HubButton(
                 icon: appState.isSystemAudioEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill",
                 tone: .accent,
                 active: appState.isSystemAudioEnabled,
-                tooltip: "屏幕音频"
+                tooltip: appState.t("hub.systemAudio")
             ) { Task { await appState.toggleSystemAudio() } }
 
             HubDivider()
@@ -39,23 +41,25 @@ struct HubView: View {
                 icon: "translate",
                 tone: .accent,
                 active: appState.captionsVisible,
-                tooltip: "字幕窗"
+                tooltip: appState.t("hub.captions")
             ) { appState.captionsVisible.toggle() }
 
             HubButton(
                 icon: "sparkles",
                 tone: .accent,
                 active: appState.suggestionVisible,
-                tooltip: "回答提示窗"
+                tooltip: appState.t("hub.suggestion")
             ) { appState.suggestionVisible.toggle() }
 
             HubDivider()
 
-            HubButton(icon: "square.and.arrow.up", tone: .accent, active: false, tooltip: "上传 RAG 资料") {
+            HubButton(icon: "square.and.arrow.up", tone: .accent, active: false,
+                      tooltip: appState.t("hub.upload")) {
                 appDelegate.pickRagResources()
             }
 
-            HubButton(icon: "gearshape.fill", tone: .accent, active: false, tooltip: "设置") {
+            HubButton(icon: "gearshape.fill", tone: .accent, active: false,
+                      tooltip: appState.t("hub.settings")) {
                 NSApp.activate(ignoringOtherApps: true)
                 openSettings()
             }

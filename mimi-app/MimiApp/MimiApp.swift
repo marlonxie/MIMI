@@ -69,6 +69,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         hubPanel?.orderFront(nil)
         applyCaptionsVisibility(appState.captionsVisible)
         applySuggestionVisibility(appState.suggestionVisible)
+
+        // 启动预热：让 audio engine 跑、WS 连。1-3s VP 启用成本付在加载阶段，
+        // 之后用户 toggle 都瞬时（mic engine 保活；speaker 重启 ~0.5s）。
+        // 失败时 toggle 内 try/catch 把 isXEnabled 维持 false，hub 显示 OFF 可重试。
+        Task { @MainActor in
+            await appState.toggleMicrophone()
+            await appState.toggleSystemAudio()
+        }
     }
 
     // MARK: 显示 / 最小化 / 关闭
@@ -111,8 +119,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// NSOpenPanel 选文件 → 复制到 mimi-backend/resources/
     /// 本轮不自动触发 indexer（让用户手动 `python -m rag.indexer`）；下轮做自动
     func pickRagResources() {
+        let lang = appState?.uiLang ?? .zh
         let panel = NSOpenPanel()
-        panel.title = "选择简历 / 项目说明文件"
+        panel.title = L.t("upload.title", lang: lang)
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
         panel.allowedContentTypes = [.pdf, .plainText, .text]
@@ -136,8 +145,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let alert = NSAlert()
-        alert.messageText = "已复制 \(copied) 个文件到 resources/"
-        alert.informativeText = "请运行：\ncd mimi-backend && python -m rag.indexer\n重建索引后回答提示功能才会用到新资料。"
+        alert.messageText = String(format: L.t("upload.alert.message", lang: lang), copied)
+        alert.informativeText = L.t("upload.alert.info", lang: lang)
         alert.runModal()
     }
 
@@ -303,7 +312,7 @@ struct MenuBarView: View {
 
     var body: some View {
         VStack {
-            Button(appDelegate.isAllHidden ? "显示悬浮窗" : "隐藏悬浮窗") {
+            Button(appDelegate.isAllHidden ? appState.t("menu.show") : appState.t("menu.hide")) {
                 if appDelegate.isAllHidden {
                     appDelegate.showAllPanels(appState: appState)
                 } else {
@@ -313,38 +322,28 @@ struct MenuBarView: View {
 
             Divider()
 
-            if appState.isCapturing {
-                Button("停止录音") {
-                    appState.stopCapture()
-                }
-            } else {
-                Button("开始录音") {
-                    Task { await appState.startCapture() }
-                }
-            }
-
-            Divider()
-
             HStack {
                 Circle()
                     .fill(appState.wsClient.isConnected ? Color.green : Color.red)
                     .frame(width: 8, height: 8)
-                Text(appState.wsClient.isConnected ? "后端已连接" : "后端未连接")
+                Text(appState.wsClient.isConnected
+                    ? appState.t("menu.connected")
+                    : appState.t("menu.disconnected"))
             }
 
             Divider()
 
-            Button("导出对话记录") {
+            Button(appState.t("menu.export")) {
                 appState.wsClient.sendExport()
             }
 
-            Button("设置…") {
+            Button(appState.t("menu.settings")) {
                 NSApp.activate(ignoringOtherApps: true)
                 openSettings()
             }
             .keyboardShortcut(",")
 
-            Button("退出") {
+            Button(appState.t("menu.quit")) {
                 appState.cleanup()
                 NSApplication.shared.terminate(nil)
             }
@@ -363,11 +362,16 @@ class AppState {
     var currentSuggestion: ParsedSuggestion?
     var isGeneratingSuggestion: Bool = false
     var selectedSentenceId: String? = nil
-    var isCapturing = false
 
-    // 运行时两路状态（不持久 — 每次启动默认都开）
-    var isMicrophoneEnabled = true
-    var isSystemAudioEnabled = true
+    /// 录音单一来源真相：mic 或 speaker 任一在跑就视为录音中
+    var isCapturing: Bool {
+        isMicrophoneEnabled || isSystemAudioEnabled
+    }
+
+    // 运行时两路状态（不持久）。默认 false：启动后由 AppDelegate 预热阶段调
+    // toggleMicrophone / toggleSystemAudio 把它们置 true，避免"视觉 ↔ 实际不一致"
+    var isMicrophoneEnabled = false
+    var isSystemAudioEnabled = false
 
     // 持久化偏好（UserDefaults）— didSet 同时写入磁盘和推送到后端
     var interviewLanguage: String = UserDefaults.standard.string(forKey: "interviewLanguage") ?? "en" {
@@ -409,6 +413,15 @@ class AppState {
         }
     }
 
+    // === 界面语言（UI i18n）===
+    var uiLanguage: String = UserDefaults.standard.string(forKey: "uiLanguage") ?? "zh" {
+        didSet { UserDefaults.standard.set(uiLanguage, forKey: "uiLanguage") }
+    }
+    /// 解析后的 UILang，给查找用
+    var uiLang: UILang { UILang(rawValue: uiLanguage) ?? .zh }
+    /// 翻译查找快捷方法。视图调 `appState.t("key")`，依赖 uiLanguage 自动追踪重渲染
+    func t(_ key: String) -> String { L.t(key, lang: uiLang) }
+
     // === API key / LLM provider ===
     var llmProvider: String = UserDefaults.standard.string(forKey: "llmProvider") ?? "gemini" {
         didSet { UserDefaults.standard.set(llmProvider, forKey: "llmProvider") }
@@ -426,18 +439,6 @@ class AppState {
         setupCallbacks()
     }
 
-    func startCapture() async {
-        wsClient.connect()
-        do {
-            try await audioCapture.startCapture()
-            isCapturing = true
-            isMicrophoneEnabled = audioCapture.isMicrophoneRunning
-            isSystemAudioEnabled = audioCapture.isSystemAudioRunning
-        } catch {
-            print("启动捕获失败: \(error)")
-        }
-    }
-
     /// 用户在 Settings 主动按"保存并应用"时调（强制推送，可覆盖 .env）
     func applyApiKey() {
         guard !apiKey.isEmpty else { return }
@@ -450,12 +451,6 @@ class AppState {
     /// SettingsView 切 provider 时调，自动从 Keychain 读对应 key 填到 UI
     func loadApiKeyForCurrentProvider() {
         apiKey = Keychain.load(key: llmProvider) ?? ""
-    }
-
-    func stopCapture() {
-        audioCapture.stopCapture()
-        wsClient.sendFlush()
-        isCapturing = false
     }
 
     func selectSentence(_ sentenceId: String?) {
@@ -482,7 +477,7 @@ class AppState {
             }
         }
         isMicrophoneEnabled = audioCapture.isMicrophoneRunning
-        isCapturing = isMicrophoneEnabled || isSystemAudioEnabled
+        flushIfBothOff()
     }
 
     func toggleSystemAudio() async {
@@ -499,11 +494,21 @@ class AppState {
             }
             isSystemAudioEnabled = audioCapture.isSystemAudioRunning
         }
-        isCapturing = isMicrophoneEnabled || isSystemAudioEnabled
+        flushIfBothOff()
+    }
+
+    /// 两路都关时让后端把 pending 的最后半句强制提交（避免"半句飘着"）。
+    /// 替代之前 `stopCapture()` 路径里手动 `sendFlush`，让 hub toggle 和（已删的）
+    /// 菜单 stop 走同一条收尾路径。
+    private func flushIfBothOff() {
+        if !isMicrophoneEnabled && !isSystemAudioEnabled && wsClient.isConnected {
+            wsClient.sendFlush()
+        }
     }
 
     func cleanup() {
-        audioCapture.stopCapture()
+        audioCapture.stopMicrophoneCapture()
+        audioCapture.stopSystemAudioCapture()
         wsClient.disconnect()
     }
 

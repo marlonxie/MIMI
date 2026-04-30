@@ -7,11 +7,11 @@ struct CaptionsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text("翻译")
+                Text(appState.t("captions.header"))
                     .font(Theme.headerFont)
                     .foregroundColor(Theme.labelSecondary)
                 Spacer()
-                Text("\(appState.translations.count) 条")
+                Text(String(format: appState.t("captions.count"), appState.translations.count))
                     .font(.caption2)
                     .foregroundColor(Theme.labelTertiary)
             }
@@ -31,6 +31,8 @@ struct CaptionsView: View {
                                 isFirstInGroup: showSpeaker,
                                 isFirstRow: index == 0,
                                 isSelected: entry.id == appState.selectedSentenceId,
+                                speakerLabel: speakerLabel(for: entry.speaker),
+                                suggestionTooltip: appState.t("captions.suggestion.tip"),
                                 onSelect: { appState.selectSentence(entry.id) },
                                 onRequestSuggestion: { appState.requestSuggestion(sentenceId: entry.id) }
                             )
@@ -49,6 +51,12 @@ struct CaptionsView: View {
             }
         }
         .frame(minWidth: 360, minHeight: 150)
+    }
+
+    private func speakerLabel(for speaker: String) -> String {
+        speaker == "interviewer"
+            ? appState.t("captions.speaker.interviewer")
+            : appState.t("captions.speaker.me")
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
@@ -89,6 +97,8 @@ struct TranslationRow: View {
     var isFirstInGroup: Bool = false
     var isFirstRow: Bool = false
     var isSelected: Bool = false
+    var speakerLabel: String = ""
+    var suggestionTooltip: String = ""
     var onSelect: (() -> Void)? = nil
     var onRequestSuggestion: (() -> Void)? = nil
 
@@ -106,7 +116,7 @@ struct TranslationRow: View {
                 VStack(alignment: .leading, spacing: 4) {
                     if showSpeaker {
                         HStack(spacing: 6) {
-                            SpeakerChip(label: entry.speakerLabel, speaker: entry.speaker)
+                            SpeakerChip(label: speakerLabel, speaker: entry.speaker)
                             Text(entry.timestamp)
                                 .font(.caption2)
                                 .foregroundColor(Theme.labelTertiary)
@@ -154,7 +164,7 @@ struct TranslationRow: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(!isSelected)
-                    .help("为这句生成回答建议")
+                    .help(suggestionTooltip)
                 }
             }
             .padding(.horizontal, 12)

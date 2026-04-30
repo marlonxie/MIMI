@@ -5,57 +5,93 @@ struct SettingsView: View {
 
     var body: some View {
         TabView {
-            Form {
-                Picker("面试语言", selection: $appState.interviewLanguage) {
-                    Text("English").tag("en")
-                    Text("Deutsch").tag("de")
-                }
-                Picker("我的母语", selection: $appState.nativeLanguage) {
-                    Text("中文").tag("zh")
-                    Text("English").tag("en")
-                }
-                Text("切换会立即推送到后端，无需重启录音。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .tabItem { Label("语言", systemImage: "globe") }
-            .padding()
+            languageTab
+                .tabItem { Label(appState.t("settings.tab.language"), systemImage: "globe") }
+                .padding()
 
-            Form {
-                Toggle("启用 RAG 面试提示", isOn: $appState.suggestionEnabled)
-                Text("开启后，面试官说完一句 ~3s 会基于你上传的资料自动给出回答参考。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .tabItem { Label("提示", systemImage: "lightbulb") }
-            .padding()
+            uiTab
+                .tabItem { Label(appState.t("settings.tab.ui"), systemImage: "paintbrush") }
+                .padding()
+
+            suggestionTab
+                .tabItem { Label(appState.t("settings.tab.suggestion"), systemImage: "lightbulb") }
+                .padding()
 
             apiKeyTab
-                .tabItem { Label("API", systemImage: "key") }
+                .tabItem { Label(appState.t("settings.tab.api"), systemImage: "key") }
                 .padding()
         }
         .frame(width: 460, height: 320)
+    }
+
+    // MARK: - Language tab
+
+    private var languageTab: some View {
+        Form {
+            Picker(appState.t("settings.interviewLanguage"),
+                   selection: $appState.interviewLanguage) {
+                Text("English").tag("en")
+                Text("Deutsch").tag("de")
+            }
+            Picker(appState.t("settings.nativeLanguage"),
+                   selection: $appState.nativeLanguage) {
+                Text("中文").tag("zh")
+                Text("English").tag("en")
+            }
+            Text(appState.t("settings.languageHint"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: - UI (interface language) tab
+
+    private var uiTab: some View {
+        Form {
+            Picker(appState.t("settings.uiLanguage"), selection: $appState.uiLanguage) {
+                ForEach(UILang.allCases, id: \.rawValue) { lang in
+                    Text(lang.displayName).tag(lang.rawValue)
+                }
+            }
+            Text(appState.t("settings.uiLanguage.hint"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: - Suggestion tab
+
+    private var suggestionTab: some View {
+        Form {
+            Toggle(appState.t("settings.suggestion.toggle"),
+                   isOn: $appState.suggestionEnabled)
+            Text(appState.t("settings.suggestion.hint"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 
     // MARK: - API Key tab
 
     private var apiKeyTab: some View {
         Form {
-            Picker("LLM Provider", selection: $appState.llmProvider) {
+            Picker(appState.t("settings.api.provider"), selection: $appState.llmProvider) {
                 Text("Google Gemini").tag("gemini")
                 Text("Anthropic Claude").tag("claude")
-                Text("本地模型（即将支持）").tag("local_mlx")
+                Text(appState.t("settings.api.local")).tag("local_mlx")
             }
             .onChange(of: appState.llmProvider) { _, _ in
                 appState.loadApiKeyForCurrentProvider()
             }
 
-            SecureField("API Key", text: $appState.apiKey, prompt: Text("粘贴你的 API key"))
+            SecureField("API Key",
+                        text: $appState.apiKey,
+                        prompt: Text(appState.t("settings.api.placeholder")))
                 .textFieldStyle(.roundedBorder)
                 .disabled(appState.llmProvider == "local_mlx")
 
             HStack {
-                Button("保存并应用") {
+                Button(appState.t("settings.api.save")) {
                     appState.applyApiKey()
                 }
                 .disabled(appState.apiKey.isEmpty || appState.llmProvider == "local_mlx")
@@ -63,23 +99,23 @@ struct SettingsView: View {
                 Spacer()
 
                 if appState.translationReady {
-                    Label("翻译已就绪", systemImage: "checkmark.circle.fill")
+                    Label(appState.t("settings.api.translationReady"),
+                          systemImage: "checkmark.circle.fill")
                         .foregroundStyle(.green)
                         .font(.caption)
                 }
             }
 
             if appState.translationReady && appState.apiKey.isEmpty {
-                // backend 已用 .env 配好；用户点这里输入会显式覆盖
                 HStack(alignment: .top, spacing: 6) {
                     Image(systemName: "info.circle").foregroundStyle(.blue)
-                    Text("后端已通过 .env 配置就绪。在此输入会覆盖 .env 的 key。")
+                    Text(appState.t("settings.api.envHint"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
 
-            Text("Key 仅存 macOS Keychain，本地保存，不上传。")
+            Text(appState.t("settings.api.keychainHint"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

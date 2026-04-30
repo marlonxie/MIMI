@@ -4,7 +4,6 @@ import ScreenCaptureKit
 @MainActor
 @Observable
 class AudioCaptureManager {
-    var isCapturing = false
     var onAudioChunk: (@MainActor (Data, String) -> Void)?
 
     var isMicrophoneRunning: Bool { audioEngine?.isRunning ?? false }
@@ -23,25 +22,6 @@ class AudioCaptureManager {
     private var systemBuffer = Data()
     private var systemAudioHandler: SystemAudioOutputHandler?  // 强引用，防止被释放
     private var videoHandler: DiscardVideoHandler?             // 强引用
-
-    // MARK: - Start / Stop
-
-    func startCapture() async throws {
-        isCapturing = true
-        // 麦克风和系统音频独立启动，一路失败不影响另一路
-        do {
-            try await startMicrophoneCapture()
-        } catch {
-            print("麦克风启动失败（系统音频不受影响）: \(error)")
-        }
-        try await startSystemAudioCapture()
-    }
-
-    func stopCapture() {
-        isCapturing = false
-        stopMicrophoneCapture()
-        stopSystemAudioCapture()
-    }
 
     // MARK: - Microphone
 
