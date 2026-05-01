@@ -390,11 +390,27 @@ async def _run_rag_and_send(
 
 
 if __name__ == "__main__":
+    import sys
+    import multiprocessing
     import uvicorn
 
-    uvicorn.run(
-        "server:app",
-        host=config["server"]["host"],
-        port=config["server"]["port"],
-        reload=True,
-    )
+    # PyInstaller 打包必需：huggingface_hub.snapshot_download 用 multiprocessing.Pool
+    # 并行下载，worker 进程被 fork 后会重新执行 __main__；freeze_support 让 worker
+    # 识别自己并退出，避免 fork bomb（每个 worker 都试图启 uvicorn）
+    multiprocessing.freeze_support()
+
+    # PyInstaller 打包后 sys.frozen=True；frozen 状态下 reload=True 会让 uvicorn
+    # 试图 spawn 子进程 import "server:app"，但 module 已被打包，spawn 失败 → 端口 listen 不起来
+    if getattr(sys, "frozen", False):
+        uvicorn.run(
+            app,
+            host=config["server"]["host"],
+            port=config["server"]["port"],
+        )
+    else:
+        uvicorn.run(
+            "server:app",
+            host=config["server"]["host"],
+            port=config["server"]["port"],
+            reload=True,
+        )
