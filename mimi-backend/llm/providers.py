@@ -26,15 +26,14 @@ PROVIDER_MAP: dict[str, dict] = {
         "default_model": "claude-sonnet-4-5-20250929",
         "kind": "remote",
     },
-    # 占位（下轮实现）：本地 MLX 模型不走 init_chat_model，
-    # 需自家 BaseChatModel 子类（用 mlx_lm.load + generate）
-    # "local_mlx": {
-    #     "lc": None,
-    #     "env": None,
-    #     "api_kwarg": None,
-    #     "default_model": "mlx-community/Qwen2.5-7B-Instruct-4bit",
-    #     "kind": "local",
-    # },
+    "ollama": {
+        "lc": "ollama",                 # init_chat_model(..., model_provider="ollama")
+        "env": None,                    # 本地 daemon，无需 api key
+        "api_kwarg": None,
+        # bench 显示 4B-instruct-2507 在 IF + 延迟上同时优于 8B-hybrid（参考 scripts/bench_llm.py）
+        "default_model": "qwen3:4b-instruct-2507-q4_K_M",
+        "kind": "local",
+    },
 }
 
 
@@ -52,13 +51,14 @@ def create_llm(provider: str, api_key: str | None = None, model: str | None = No
         raise ValueError(f"未知 provider: {provider}; 支持 {list(PROVIDER_MAP.keys())}")
 
     info = PROVIDER_MAP[provider]
-    if info["kind"] == "local":
-        raise NotImplementedError(f"{provider} (local) 尚未实现，下轮加")
-
     model = model or info["default_model"]
-    if api_key:
+    if api_key and info["api_kwarg"]:
         kwargs[info["api_kwarg"]] = api_key
-    return init_chat_model(f"{info['lc']}:{model}", **kwargs)
+    # Qwen3 默认 thinking 模式会拖慢 TTFT 数倍；翻译/intent 是短输出确定性任务，关掉
+    if info["lc"] == "ollama":
+        kwargs.setdefault("reasoning", False)
+    # 显式 model_provider，避免 model 名含冒号（如 "qwen3:8b"）被 init_chat_model 误拆
+    return init_chat_model(model, model_provider=info["lc"], **kwargs)
 
 
 def default_model_for(provider: str) -> str:

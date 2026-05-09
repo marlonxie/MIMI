@@ -86,46 +86,58 @@ struct SettingsView: View {
             Picker(appState.t("settings.api.provider"), selection: $appState.llmProvider) {
                 Text("Google Gemini").tag("gemini")
                 Text("Anthropic Claude").tag("claude")
-                Text(appState.t("settings.api.local")).tag("local_mlx")
+                Text(appState.t("settings.api.local")).tag("ollama")
             }
             .onChange(of: appState.llmProvider) { _, _ in
                 appState.loadApiKeyForCurrentProvider()
             }
 
-            SecureField("API Key",
-                        text: $appState.apiKey,
-                        prompt: Text(appState.t("settings.api.placeholder")))
-                .textFieldStyle(.roundedBorder)
-                .disabled(appState.llmProvider == "local_mlx")
-
-            HStack {
-                Button(appState.t("settings.api.save")) {
-                    appState.applyApiKey()
-                }
-                .disabled(appState.apiKey.isEmpty || appState.llmProvider == "local_mlx")
-
-                Spacer()
-
-                if appState.translationReady {
-                    Label(appState.t("settings.api.translationReady"),
-                          systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                        .font(.caption)
-                }
-            }
-
-            if appState.translationReady && appState.apiKey.isEmpty {
+            if appState.llmProvider == "ollama" {
                 HStack(alignment: .top, spacing: 6) {
-                    Image(systemName: "info.circle").foregroundStyle(.blue)
-                    Text(appState.t("settings.api.envHint"))
+                    Image(systemName: "checkmark.shield").foregroundStyle(.green)
+                    Text(appState.t("settings.api.localHint"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-            }
 
-            Text(appState.t("settings.api.keychainHint"))
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                Button(appState.t("settings.api.save")) {
+                    appState.applyApiKey()
+                }
+            } else {
+                SecureField("API Key",
+                            text: $appState.apiKey,
+                            prompt: Text(appState.t("settings.api.placeholder")))
+                    .textFieldStyle(.roundedBorder)
+
+                HStack {
+                    Button(appState.t("settings.api.save")) {
+                        appState.applyApiKey()
+                    }
+                    .disabled(appState.apiKey.isEmpty)
+
+                    Spacer()
+
+                    if appState.translationReady {
+                        Label(appState.t("settings.api.translationReady"),
+                              systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                            .font(.caption)
+                    }
+                }
+
+                if appState.translationReady && appState.apiKey.isEmpty {
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: "info.circle").foregroundStyle(.blue)
+                        Text(appState.t("settings.api.envHint"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Text(appState.t("settings.api.keychainHint"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 }

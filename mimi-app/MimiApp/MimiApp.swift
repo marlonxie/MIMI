@@ -494,9 +494,13 @@ class AppState {
     }
 
     /// 用户在 Settings 主动按"保存并应用"时调（强制推送，可覆盖 .env）
+    /// local provider（如 ollama）允许空 key——只是发切换消息让后端切 active_provider。
     func applyApiKey() {
-        guard !apiKey.isEmpty else { return }
-        _ = Keychain.save(key: llmProvider, value: apiKey)
+        let isLocalProvider = (llmProvider == "ollama")
+        guard isLocalProvider || !apiKey.isEmpty else { return }
+        if !apiKey.isEmpty {
+            _ = Keychain.save(key: llmProvider, value: apiKey)
+        }
         if wsClient.isConnected {
             wsClient.sendApiKeys(provider: llmProvider, apiKey: apiKey)
         }

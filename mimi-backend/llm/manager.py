@@ -11,18 +11,30 @@ import os
 
 from llm.providers import PROVIDER_MAP, create_llm, needs_api_key
 
+# preferred provider 缺 key 时降级到的 local provider
+FALLBACK_LOCAL_PROVIDER = "ollama"
+
 
 class LLMManager:
     """LLM provider + api key 单例状态。"""
 
-    def __init__(self, default_provider: str = "gemini"):
-        self.active_provider = default_provider
+    def __init__(self, default_provider: str = "gemini", default_model: str | None = None):
+        """构造时可指定 model 覆盖 PROVIDER_MAP 默认 (用于 bench 比较同 provider 不同 model)."""
+        self._model_override = default_model
         self._keys: dict[str, str] = {}
         # 启动时从 env 读所有已知 provider 的 key（兼容 .env 开发者路径）
         for provider, info in PROVIDER_MAP.items():
             env_var = info["env"]
             if env_var and os.environ.get(env_var):
                 self._keys[provider] = os.environ[env_var]
+
+        # 智能 fallback：preferred provider 需 key 但缺 key 时降级到本地 ollama
+        # 用户配了 key 走 cloud；零配置开箱用本地（daemon 起着即可）
+        if needs_api_key(default_provider) and default_provider not in self._keys:
+            print(f"[llm] {default_provider} 缺 key，fallback → {FALLBACK_LOCAL_PROVIDER}")
+            self.active_provider = FALLBACK_LOCAL_PROVIDER
+        else:
+            self.active_provider = default_provider
 
     def has_key(self, provider: str | None = None) -> bool:
         """判断给定 provider（默认当前 active）是否就绪可建 chain。"""
@@ -46,5 +58,6 @@ class LLMManager:
         return create_llm(
             self.active_provider,
             api_key=self._keys.get(self.active_provider),
+            model=self._model_override,
             **kwargs,
         )

@@ -215,7 +215,10 @@ async def websocket_endpoint(websocket: WebSocket):
                 elif msg_type == "set_api_keys":
                     provider = data.get("provider", "gemini")
                     api_key = data.get("api_key", "")
-                    if not api_key:
+                    # local provider（ollama 等）无需 key；只对 remote provider 校验非空
+                    from llm.providers import PROVIDER_MAP
+                    is_local = PROVIDER_MAP.get(provider, {}).get("kind") == "local"
+                    if not is_local and not api_key:
                         await websocket.send_json({
                             "type": "api_keys_error",
                             "reason": "empty key",

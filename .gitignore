@@ -51,3 +51,6 @@ mimi-backend/tests/fixtures/ted_run_*.txt
 
 # Diagnostic audit outputs (regenerated per run)
 mimi-backend/tests/diagnostics/output/
+
+# LLM bench output dump (regenerated per run)
+mimi-backend/scripts/bench_llm_output.jsonl

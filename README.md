@@ -62,7 +62,7 @@ Manual override: click an interviewer subtitle row → 💡 icon appears → cli
 | Speech-to-text | mlx-whisper fp16 (Apple Silicon Metal GPU + ANE) |
 | Streaming STT | LocalAgreement-2 (consecutive-inference LCP) |
 | Conversation | SharedHistory (shared) + SentenceSegmenter (per-speaker) |
-| Translation | LangChain LCEL → Gemini Flash / Claude Sonnet, streamed |
+| Translation | LangChain LCEL → Ollama Qwen3-4B-Instruct-2507 (default) / Gemini Flash / Claude Sonnet, streamed |
 | RAG | LangChain + ChromaDB + all-MiniLM-L6-v2 embeddings |
 | Question gate | Gemini flash yes/no classifier |
 | Frontend | SwiftUI + NSPanel overlay + Settings scene |
@@ -73,7 +73,9 @@ Manual override: click an interviewer subtitle row → 💡 icon appears → cli
 - macOS 14+ on Apple Silicon (M1/M2/M3)
 - Python 3.11+ (conda recommended)
 - Xcode 16+
-- API key for Gemini or Claude
+- **One** LLM backend:
+  - **Local (default, recommended)** — Ollama daemon + Qwen3-4B-Instruct-2507 (zero API cost, offline, Apache 2.0)
+  - Or cloud — Gemini / Claude API key
 
 ## Setup
 
@@ -86,21 +88,42 @@ cd MIMI
 conda create -n mimi python=3.11
 conda activate mimi
 pip install -r mimi-backend/requirements.txt
+```
 
-# 3. Environment variables
+### LLM backend (pick one)
+
+**Option A — Local Ollama (default, no API key needed)**
+
+```bash
+brew install ollama
+brew services start ollama
+ollama pull qwen3:4b-instruct-2507-q4_K_M
+```
+
+Skip the `.env` step below. MIMI auto-detects "no API key" and falls back to local Ollama. TTFT ~100ms, vs Gemini's ~1500ms (network RTT included).
+
+**Option B — Cloud (Gemini / Claude)**
+
+```bash
 cp mimi-backend/.env.example mimi-backend/.env
-# Edit .env with your API keys
+# Edit .env to set GOOGLE_API_KEY or ANTHROPIC_API_KEY
+```
 
-# 4. (Optional) Drop your resume / prep docs into resources/ and index for RAG
+Or skip `.env` and set the key in the Settings UI (Cmd+,) at runtime — keys are stored in macOS Keychain.
+
+### Continue setup
+
+```bash
+# 3. (Optional) Drop your resume / prep docs into resources/ and index for RAG
 mkdir -p resources
 # ...add your .md / .pdf / .txt files...
 cd mimi-backend && python -m rag.indexer
 
-# 5. Start backend
+# 4. Start backend
 python server.py
 # WebSocket on ws://127.0.0.1:8765
 
-# 6. Build & run the Swift app
+# 5. Build & run the Swift app
 open ../mimi-app/MimiApp.xcodeproj
 # Grant microphone + screen recording permissions when prompted
 ```
@@ -118,7 +141,7 @@ stt:
   model_size: "small"         # tiny / base / small / medium / large
 
 translator:
-  provider: "gemini"          # "gemini" or "claude"
+  provider: "gemini"          # "gemini" / "claude" / "ollama"; if cloud provider has no key, auto-falls back to ollama
   model: "gemini-2.5-flash"
 
 conversation:
