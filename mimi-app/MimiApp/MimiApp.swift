@@ -29,6 +29,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var hubPanel: NSPanel?
     var captionsPanel: NSPanel?
     var suggestionPanel: NSPanel?
+    var onboardingPanel: NSPanel?
     weak var appState: AppState?
 
     /// 创建（如未创建）+ 显示三个 panel。AppState 的 captionsVisible/suggestionVisible 决定子窗是否一同打开。
@@ -77,6 +78,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             await appState.toggleMicrophone()
             await appState.toggleSystemAudio()
         }
+
+        // 首次启动弹教程
+        if !appState.hasCompletedOnboarding {
+            showOnboarding(appState: appState)
+        }
+    }
+
+    /// 弹出 OnboardingPanel。Settings 的"重看教程"按钮也调它。
+    func showOnboarding(appState: AppState) {
+        // 已存在则直接 front
+        if let panel = onboardingPanel {
+            panel.orderFrontRegardless()
+            return
+        }
+        let panel = makeFloatingPanel(
+            autosaveName: "MIMI.Onboarding.v1",
+            defaultRect: NSRect(x: 0, y: 0, width: 520, height: 380),
+            rootView: AnyView(OnboardingView(appState: appState, onClose: { [weak self] in
+                self?.onboardingPanel?.close()
+                self?.onboardingPanel = nil
+            })),
+            borderless: false
+        )
+        onboardingPanel = panel
+        panel.center()
+        panel.orderFrontRegardless()
     }
 
     // MARK: 显示 / 最小化 / 关闭
@@ -412,6 +439,15 @@ class AppState {
             appDelegate?.applySuggestionVisibility(suggestionVisible)
         }
     }
+
+    // === Onboarding（首次启动教程）===
+    var hasCompletedOnboarding: Bool = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding") {
+        didSet { UserDefaults.standard.set(hasCompletedOnboarding, forKey: "hasCompletedOnboarding") }
+    }
+    /// 当前 onboarding 步骤 (0..5)。Step 0 = 等 backend；Step 1-4 = 教程；Step 5 = 完成屏
+    var onboardingStep: Int = 0
+    /// backend 是否已就绪（WS 已连）。OnboardingView Step 0 用它决定显示 spinner 还是 "下一步"
+    var backendReady: Bool { wsClient.isConnected }
 
     // === 界面语言（UI i18n）===
     var uiLanguage: String = UserDefaults.standard.string(forKey: "uiLanguage") ?? "zh" {

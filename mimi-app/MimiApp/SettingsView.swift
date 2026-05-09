@@ -56,6 +56,14 @@ struct SettingsView: View {
             Text(appState.t("settings.uiLanguage.hint"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            Divider().padding(.vertical, 6)
+
+            Button(appState.t("settings.replayOnboarding")) {
+                appState.hasCompletedOnboarding = false
+                appState.onboardingStep = 0
+                appState.appDelegate?.showOnboarding(appState: appState)
+            }
         }
     }
 
