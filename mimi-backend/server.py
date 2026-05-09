@@ -391,6 +391,7 @@ async def _run_rag_and_send(
 
 if __name__ == "__main__":
     import sys
+    import argparse
     import multiprocessing
     import uvicorn
 
@@ -398,6 +399,26 @@ if __name__ == "__main__":
     # 并行下载，worker 进程被 fork 后会重新执行 __main__；freeze_support 让 worker
     # 识别自己并退出，避免 fork bomb（每个 worker 都试图启 uvicorn）
     multiprocessing.freeze_support()
+
+    parser = argparse.ArgumentParser(prog="mimi-backend")
+    parser.add_argument(
+        "--prefetch-model",
+        action="store_true",
+        help="下载 mlx-whisper 模型后立即退出（brew cask postflight 用，让 ~500MB 下载发生在终端而非 app 首次启动）",
+    )
+    args = parser.parse_args()
+
+    if args.prefetch_model:
+        # 触发 mlx-whisper 模型从 HuggingFace 下载到 ~/.cache/huggingface/
+        # 不启 WS server，下完即退出
+        import numpy as np
+        from audio.stt_mlx import SpeechToText
+        print("正在下载语音模型 (mlx-community/whisper-small-mlx, ~500MB)...")
+        stt = SpeechToText()
+        # 跑一次空 transcribe 强制 mlx 把 weights 真正 load 进来（构造时只下载文件元数据）
+        stt.transcribe_audio(np.zeros(16000, dtype=np.float32))
+        print("✓ 模型下载完成，缓存在 ~/.cache/huggingface/")
+        sys.exit(0)
 
     # PyInstaller 打包后 sys.frozen=True；frozen 状态下 reload=True 会让 uvicorn
     # 试图 spawn 子进程 import "server:app"，但 module 已被打包，spawn 失败 → 端口 listen 不起来
