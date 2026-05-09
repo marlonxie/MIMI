@@ -38,8 +38,9 @@ conversation:
   # 三层 pipeline 第二层：LLM 判定这句是否值得生成建议（过滤寒暄/过渡语）
   # 关掉 → 退化成"每句过 local filter 就触发 RAG"
   intent_gate: true
-  # 对话记录导出路径
-  export_path: "./transcripts"
+  # 对话记录默认导出目录（仅 CLI / 测试走这里；UI 走 NSSavePanel 用户自选路径）
+  # `~` 自动 expanduser；macOS 标准 app 私有数据位置
+  export_path: "~/Library/Application Support/MIMI/transcripts"
 
 rag:
   # embedding 模型（本地运行，22MB）
@@ -52,10 +53,11 @@ rag:
   chunk_size: 500
   # 切片重叠
   chunk_overlap: 50
-  # ChromaDB 存储路径
-  chroma_path: "./rag/chroma_store"
-  # 资料目录（相对于项目根目录）
-  resources_path: "../resources"
+  # ChromaDB 向量库存储路径（macOS 标准 app 私有数据位置）
+  chroma_path: "~/Library/Application Support/MIMI/chroma_store"
+  # RAG 资料目录：前端上传 + 后端 indexer 读 + RAG engine 检索
+  # 用户首次手动一次：cp ./resources/* ~/Library/Application\ Support/MIMI/resources/
+  resources_path: "~/Library/Application Support/MIMI/resources"
 
 audio:
   # 采样率

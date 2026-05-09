@@ -45,12 +45,22 @@ intent_classifier = None
 
 @asynccontextmanager
 async def lifespan(app):
-    """服务启动时预加载模型"""
+    """服务启动时预加载模型 + 创建用户数据目录"""
     global rag_engine, intent_classifier
     print("MIMI 后端启动中...")
+
+    # 创建 ~/Library/Application Support/MIMI/{resources,transcripts,chroma_store}
+    # （朋友首次启动时这些目录都不存在）
+    for cfg_path in [
+        config["conversation"]["export_path"],
+        config["rag"]["chroma_path"],
+        config["rag"]["resources_path"],
+    ]:
+        Path(cfg_path).expanduser().mkdir(parents=True, exist_ok=True)
+
     stt.load_model()
 
-    chroma_path = Path(__file__).parent / config["rag"]["chroma_path"]
+    chroma_path = Path(config["rag"]["chroma_path"]).expanduser()
     if chroma_path.exists() and any(chroma_path.iterdir()):
         try:
             from rag.engine import RAGEngine
@@ -63,7 +73,7 @@ async def lifespan(app):
         except Exception as e:
             print(f"RAG 引擎加载失败（跳过）: {e}")
     else:
-        print("未找到 RAG 索引，回答提示功能未启用。运行 python -m rag.indexer 创建索引")
+        print("未找到 RAG 索引，前端上传 RAG 资料后会自动重建（rebuild_index）")
 
     print(f"服务运行在 {config['server']['host']}:{config['server']['port']}")
     yield
@@ -144,8 +154,39 @@ async def websocket_endpoint(websocket: WebSocket):
                     await websocket.send_json({"type": "config_ack"})
 
                 elif msg_type == "export":
-                    filepath = shared_history.export_transcript()
+                    # path 可选：UI 走 NSSavePanel 选好后传过来；CLI / 测试不传走默认目录
+                    requested_path = data.get("path")
+                    filepath = shared_history.export_transcript(output_path=requested_path)
                     await websocket.send_json({"type": "export_ack", "path": filepath})
+
+                elif msg_type == "rebuild_index":
+                    # 前端上传 RAG 资料后触发：跑 indexer + 让 RAG engine 重新加载向量库
+                    global rag_engine, intent_classifier
+                    try:
+                        from rag.indexer import RAGIndexer
+                        from rag.engine import RAGEngine
+                        print("[index] 重建中...")
+                        indexer = RAGIndexer()
+                        _, files_count = indexer.index()
+                        if rag_engine is None and files_count > 0:
+                            # 第一次上传 + 索引：lifespan 启动时还没 RAG engine，现在创建
+                            rag_engine = RAGEngine(llm_manager, config_path)
+                            if intent_classifier is None:
+                                intent_classifier = IntentClassifier(llm_manager)
+                        elif rag_engine is not None:
+                            rag_engine.reload_index()
+                        await websocket.send_json({
+                            "type": "rebuild_index_ack",
+                            "count": files_count,
+                        })
+                        print(f"[index] 完成，{files_count} 个文件")
+                    except Exception as e:
+                        print(f"[index] 失败: {e}")
+                        await websocket.send_json({
+                            "type": "rebuild_index_ack",
+                            "count": 0,
+                            "error": str(e),
+                        })
 
                 elif msg_type == "flush":
                     for source in sources.values():

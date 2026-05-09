@@ -11,6 +11,8 @@ class WebSocketClient {
     var onSuggestion: (@MainActor (SuggestionMessage) -> Void)?
     var onStatus: (@MainActor (StatusMessage) -> Void)?
     var onApiKeysAck: (@MainActor (ApiKeysAckMessage) -> Void)?
+    var onExportAck: (@MainActor (ExportAckMessage) -> Void)?
+    var onRebuildIndexAck: (@MainActor (RebuildIndexAckMessage) -> Void)?
 
     private var webSocket: URLSessionWebSocketTask?
     private var session: URLSession?
@@ -67,6 +69,15 @@ class WebSocketClient {
     }
 
     func sendExport() { sendJSON(ControlMessage.export) }
+    /// UI 走 NSSavePanel 选好绝对路径后调；后端写到那个路径后回 export_ack
+    func sendExport(path: String) {
+        struct ExportWithPath: Codable { let type: String; let path: String }
+        sendJSON(ExportWithPath(type: "export", path: path))
+    }
+    func sendRebuildIndex() {
+        struct RebuildMsg: Codable { let type: String }
+        sendJSON(RebuildMsg(type: "rebuild_index"))
+    }
     func sendFlush() { sendJSON(ControlMessage.flush) }
     func sendLanguages(interview: String, native: String) {
         sendJSON(LanguageConfigMessage(interview: interview, native: native))
@@ -140,6 +151,14 @@ class WebSocketClient {
         case "api_keys_ack":
             if let msg = try? JSONDecoder().decode(ApiKeysAckMessage.self, from: data) {
                 onApiKeysAck?(msg)
+            }
+        case "export_ack":
+            if let msg = try? JSONDecoder().decode(ExportAckMessage.self, from: data) {
+                onExportAck?(msg)
+            }
+        case "rebuild_index_ack":
+            if let msg = try? JSONDecoder().decode(RebuildIndexAckMessage.self, from: data) {
+                onRebuildIndexAck?(msg)
             }
         default:
             break

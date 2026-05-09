@@ -72,6 +72,19 @@ struct ConfigAckMessage: Codable {
     let source: String
 }
 
+/// 后端导出对话记录后回的 ack：path = 真正写入的绝对路径
+struct ExportAckMessage: Codable {
+    let type: String
+    let path: String
+}
+
+/// 后端 rebuild_index 完成后回的 ack：count = 索引到的源文件数；error 失败时才有
+struct RebuildIndexAckMessage: Codable {
+    let type: String
+    let count: Int
+    let error: String?
+}
+
 // MARK: - Client Messages
 
 struct ConfigMessage: Codable {

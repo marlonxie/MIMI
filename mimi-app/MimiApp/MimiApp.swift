@@ -155,8 +155,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         guard panel.runModal() == .OK else { return }
 
-        let resources = URL(fileURLWithPath: "/Users/marlon/MIMI/mimi-backend/resources")
-        try? FileManager.default.createDirectory(at: resources, withIntermediateDirectories: true)
+        // ~/Library/Application Support/MIMI/resources/ — macOS 标准 app 私有数据位置；
+        // 后端 indexer 同样从这个路径读，前后端路径对齐
+        guard let support = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return }
+        let resources = support.appendingPathComponent("MIMI/resources")
+        try? FileManager.default.createDirectory(at: resources,
+                                                  withIntermediateDirectories: true)
 
         var copied = 0
         for src in panel.urls {
@@ -171,9 +176,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        // 触发后端重建索引；ack 由 AppState.setupCallbacks.onRebuildIndexAck 接到后弹完成提示
+        appState?.wsClient.sendRebuildIndex()
+
+        // 立即弹"正在索引"提示（不阻塞，等 ack 时再弹完成提示）
         let alert = NSAlert()
-        alert.messageText = String(format: L.t("upload.alert.message", lang: lang), copied)
-        alert.informativeText = L.t("upload.alert.info", lang: lang)
+        alert.messageText = String(format: L.t("upload.alert.indexing", lang: lang), copied)
+        alert.informativeText = ""
         alert.runModal()
     }
 
@@ -361,7 +370,16 @@ struct MenuBarView: View {
             Divider()
 
             Button(appState.t("menu.export")) {
-                appState.wsClient.sendExport()
+                let panel = NSSavePanel()
+                panel.title = appState.t("export.savePanel.title")
+                panel.allowedContentTypes = [.json]
+                panel.canCreateDirectories = true
+                let stamp = DateFormatter()
+                stamp.dateFormat = "yyyyMMdd_HHmmss"
+                panel.nameFieldStringValue = "interview_\(stamp.string(from: Date())).json"
+                if panel.runModal() == .OK, let url = panel.url {
+                    appState.wsClient.sendExport(path: url.path)
+                }
             }
 
             Button(appState.t("menu.settings")) {
@@ -618,6 +636,37 @@ class AppState {
             guard let self else { return }
             self.translationReady = msg.translatorReady
             self.ragReady = msg.ragReady
+        }
+
+        // 导出对话记录 ack：弹 alert 显示路径 + "在 Finder 中显示"
+        wsClient.onExportAck = { [weak self] msg in
+            guard let self else { return }
+            let alert = NSAlert()
+            alert.messageText = self.t("export.success")
+            alert.informativeText = msg.path
+            alert.addButton(withTitle: self.t("export.revealInFinder"))
+            alert.addButton(withTitle: self.t("export.ok"))
+            let resp = alert.runModal()
+            if resp == .alertFirstButtonReturn {
+                NSWorkspace.shared.activateFileViewerSelecting(
+                    [URL(fileURLWithPath: msg.path)]
+                )
+            }
+        }
+
+        // RAG 重建索引 ack：弹完成 / 失败提示；同步 rag 状态
+        wsClient.onRebuildIndexAck = { [weak self] msg in
+            guard let self else { return }
+            let alert = NSAlert()
+            if let err = msg.error {
+                alert.messageText = String(format: self.t("upload.alert.indexFailed"), err)
+                alert.alertStyle = .warning
+            } else {
+                alert.messageText = String(format: self.t("upload.alert.indexed"), msg.count)
+                // 重建后 rag 应当已 ready（如果之前没 ready 是因为没索引）
+                self.ragLoaded = msg.count > 0
+            }
+            alert.runModal()
         }
 
         // 连接建立后才能可靠发消息（sendJSON 有 isConnected 守卫）

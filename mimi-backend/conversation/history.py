@@ -15,7 +15,8 @@ class SharedHistory:
 
     def __init__(self, context_window_size: int = 10, export_path: str = "./transcripts"):
         self.context_window_size = context_window_size
-        self.export_path = Path(export_path)
+        # expanduser 让 "~/Library/Application Support/MIMI/transcripts" 解析成绝对路径
+        self.export_path = Path(export_path).expanduser()
         self.history: list[dict] = []  # 双路交织的完整对话记录
         self.start_time = time.time()
 
@@ -96,12 +97,21 @@ class SharedHistory:
         hours, minutes = divmod(minutes, 60)
         return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
-    def export_transcript(self, filename: str = None) -> str:
-        """导出完整对话记录到文件"""
-        self.export_path.mkdir(parents=True, exist_ok=True)
-        if filename is None:
+    def export_transcript(self, output_path: str | None = None) -> str:
+        """导出完整对话记录到文件。
+
+        Args:
+            output_path: 可选。UI（NSSavePanel）选定的绝对路径；None → 走 export_path 默认目录。
+        """
+        if output_path:
+            # UI 选了具体路径，写到那
+            filepath = Path(output_path).expanduser().resolve()
+            filepath.parent.mkdir(parents=True, exist_ok=True)
+        else:
+            # CLI / 测试走默认目录
+            self.export_path.mkdir(parents=True, exist_ok=True)
             filename = f"interview_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-        filepath = self.export_path / filename
+            filepath = self.export_path / filename
         data = {
             "date": datetime.now().isoformat(),
             "duration_seconds": time.time() - self.start_time,

@@ -64,7 +64,11 @@ class RAGEngine:
             config = yaml.safe_load(f)
 
         rag_config = config["rag"]
-        chroma_path = str(Path(__file__).parent.parent / rag_config["chroma_path"])
+        # expanduser 让 "~/Library/Application Support/MIMI/chroma_store" 解析成绝对路径
+        chroma_path = str(Path(rag_config["chroma_path"]).expanduser())
+        # 暂存供 rebuild() 复用
+        self._chroma_path = chroma_path
+        self._collection_name = "interview_materials"
 
         # Embedding 模型（与 indexer 相同），不依赖 api key
         self.embeddings = HuggingFaceEmbeddings(
@@ -80,14 +84,16 @@ class RAGEngine:
             persist_directory=chroma_path,
         )
 
-        # Retriever
-        self.retriever = self.vector_store.as_retriever(
-            search_type=rag_config.get("search_type", "mmr"),
-            search_kwargs={
+        # 暂存 retriever 配置供 reload_index() 复用
+        self._retriever_kwargs = {
+            "search_type": rag_config.get("search_type", "mmr"),
+            "search_kwargs": {
                 "k": rag_config.get("top_k", 3),
                 "fetch_k": rag_config.get("top_k", 3) + 2,
             },
-        )
+        }
+        # Retriever
+        self.retriever = self.vector_store.as_retriever(**self._retriever_kwargs)
 
         # LLM 部分懒就绪
         self.manager = llm_manager
@@ -107,7 +113,18 @@ class RAGEngine:
             print(f"[rag] build failed: {e}")
 
     def rebuild(self) -> None:
+        """LLM 链重建（API key 切换时调）。不动 vector store。"""
         self._try_build()
+
+    def reload_index(self) -> None:
+        """重新加载 ChromaDB 向量库（rebuild_index WS 调用后必调，保证 retriever
+        看到 indexer 刚写入的新 chunks）。"""
+        self.vector_store = Chroma(
+            collection_name=self._collection_name,
+            embedding_function=self.embeddings,
+            persist_directory=self._chroma_path,
+        )
+        self.retriever = self.vector_store.as_retriever(**self._retriever_kwargs)
 
     @property
     def is_ready(self) -> bool:
