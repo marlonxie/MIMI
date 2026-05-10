@@ -530,11 +530,15 @@ class AppState {
         setupCallbacks()
     }
 
-    /// 用户在 Settings 主动按"保存并应用"时调（强制推送，可覆盖 .env）
-    /// local provider（如 ollama）允许空 key——只是发切换消息让后端切 active_provider。
+    /// 用户在 Settings 主动按"保存并应用"时调，或 picker 切换时自动调。
+    ///
+    /// 总是发送（即使 apiKey 为空）：
+    /// - 本地 provider 不需要 key；
+    /// - 切回已加载过 key 的 cloud provider（.env 启动加载 / Keychain 之前存）时
+    ///   后端用 has_key 判断已有就接受空 key，仅切 active；
+    /// - 真的没 key 时后端回 api_keys_error，前端 mismatch banner 会显示后端实际状态。
+    /// 仅 apiKey 非空时才写 Keychain。
     func applyApiKey() {
-        let isLocalProvider = (llmProvider == "ollama")
-        guard isLocalProvider || !apiKey.isEmpty else { return }
         if !apiKey.isEmpty {
             _ = Keychain.save(key: llmProvider, value: apiKey)
         }

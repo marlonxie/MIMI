@@ -281,10 +281,12 @@ async def websocket_endpoint(websocket: WebSocket):
                 elif msg_type == "set_api_keys":
                     provider = data.get("provider", "gemini")
                     api_key = data.get("api_key", "")
-                    # local provider（ollama 等）无需 key；只对 remote provider 校验非空
+                    # local provider 无需 key；remote provider 接受空 key 当且仅当
+                    # backend 已经有这个 provider 的 key（.env 加载或之前 set 过）
+                    # —— 让用户切到 ollama 再切回 gemini 时不需要重新粘 key。
                     from llm.providers import PROVIDER_MAP
                     is_local = PROVIDER_MAP.get(provider, {}).get("kind") == "local"
-                    if not is_local and not api_key:
+                    if not is_local and not api_key and not llm_manager.has_key(provider):
                         await websocket.send_json({
                             "type": "api_keys_error",
                             "reason": "empty key",

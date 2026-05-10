@@ -44,8 +44,14 @@ class LLMManager:
         return provider in self._keys
 
     def set_key(self, provider: str, api_key: str) -> None:
-        """前端推送时调。同时切换 active_provider。"""
-        self._keys[provider] = api_key
+        """前端推送时调。同时切换 active_provider。
+
+        api_key 非空才覆盖 _keys[provider]；空 key 表示"只切 active，沿用之前已加载的
+        key"（来源 .env 启动时加载、之前 set 过、或本地 provider 根本不需要 key）。
+        否则用户切到 ollama 再切回 gemini 时会用空字符串覆盖掉 .env 加载的真 key。
+        """
+        if api_key:
+            self._keys[provider] = api_key
         self.active_provider = provider
 
     def make_llm(self, **kwargs):

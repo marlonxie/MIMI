@@ -93,13 +93,14 @@ struct SettingsView: View {
                 Text("Anthropic Claude").tag("claude")
                 Text(appState.t("settings.api.local")).tag("ollama")
             }
-            .onChange(of: appState.llmProvider) { _, newValue in
+            .onChange(of: appState.llmProvider) { _, _ in
                 appState.loadApiKeyForCurrentProvider()
-                // 本地 provider 没有 key 要保存，"保存并应用"按钮反而费解 — 选了即应用。
-                // 远程 provider 仍要走"粘 key → apply"流程，因为没 key 后端会拒绝。
-                if newValue == "ollama" {
-                    appState.applyApiKey()
-                }
+                // 切到任何 provider 都自动尝试 apply：
+                // - 本地 provider：总是成功（无需 key）
+                // - 远程 provider：apiKey 非空就更新 + 切；空但 backend 已加载过 key
+                //   （.env / Keychain 之前存）也成功；都没有 backend 才拒绝。
+                // 这样切回曾经用过的 cloud provider 不需要重新粘 key。
+                appState.applyApiKey()
             }
 
             // picker 与 backend 实际 active_provider 不一致时的橙色提示。
