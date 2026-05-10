@@ -156,6 +156,33 @@ audio:
 
 Runtime-mutable via the Swift Settings panel (Cmd+,): `interview_language`, `native_language`, `enable_suggestion`. Changes push to the backend over WebSocket without reconnecting.
 
+## Troubleshooting
+
+### System audio captions stop appearing (mic still works)
+
+**Symptom**: Interviewer-side subtitles disappear or never show, but your own voice (microphone) still gets transcribed normally. Backend logs show `interviewer peak ~0.015` regardless of how loud the audio is playing.
+
+**Cause**: Known macOS 26 (Tahoe) CoreAudio bug. Some client process pollutes shared HAL state, after which all subsequent audio captures (ScreenCaptureKit, AVAudioEngine taps) return ~30 dB attenuated audio. Confirmed by Rogue Amoeba (Audio Hijack developers); not a MIMI issue.
+
+**Fix**:
+
+```bash
+# 1. Quit Xcode first (Xcode + CoreSimulator are top polluting clients)
+# 2. Run the recovery script (will ask for sudo password)
+bash mimi-backend/scripts/fix_audio.sh
+# 3. Restart backend + MimiApp
+```
+
+The script kills CoreAudio clients in the right order then restarts the audio daemons (`killall coreaudiod` alone doesn't work — surviving clients re-pollute within ~1s). Effect lasts 30-60 min.
+
+**Lighter alternative** (~30 sec of clean capture): Option-click menu bar volume icon, switch output device, switch back. Bounces HAL state without killing processes.
+
+**Permanent**: Reboot, or wait for Apple to ship the actual fix.
+
+References:
+- [Rogue Amoeba: macOS 26 audio bugs (Nov 2025)](https://weblog.rogueamoeba.com/2025/11/04/macos-26-tahoe-includes-important-audio-related-bug-fixes/)
+- [metrovoc fixaudio.sh gist](https://gist.github.com/metrovoc/0b5e3590c6069cf99b01559863bc2ce4)
+
 ## License
 
 MIT
