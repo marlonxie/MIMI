@@ -92,6 +92,7 @@ class SpeechToText:
             task="transcribe",
             word_timestamps=True,  # LocalAgreement-2 需要 word-level 时间戳
             condition_on_previous_text=False,  # 关闭跨段条件化，显著减少重复幻觉
+            hallucination_silence_threshold=2.0,  # 静默 ≥2s 跳过 decode
         )
 
         return {
@@ -102,6 +103,10 @@ class SpeechToText:
                     "start": float(seg["start"]),
                     "end": float(seg["end"]),
                     "text": seg["text"].strip(),
+                    # streaming._drop_hallucinations 用这三个信号做后置过滤
+                    "no_speech_prob": float(seg.get("no_speech_prob", 0.0)),
+                    "avg_logprob": float(seg.get("avg_logprob", 0.0)),
+                    "compression_ratio": float(seg.get("compression_ratio", 1.0)),
                     "words": [
                         {
                             "word": w["word"],

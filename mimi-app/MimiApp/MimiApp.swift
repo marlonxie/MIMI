@@ -648,7 +648,7 @@ class AppState {
         <head>
           <meta charset="utf-8">
           <style>
-            @page { margin: 0.75in; }
+            @page { size: letter; margin: 0.75in; }
             body { font-family: -apple-system, "PingFang SC", sans-serif; line-height: 1.6; color: #1a1a1a; }
             h1 { font-size: 22px; border-bottom: 2px solid #0a84ff; padding-bottom: 6px; margin-top: 0; }
             .meta { color: #666; font-size: 11px; margin-bottom: 20px; }

@@ -18,6 +18,45 @@ from dataclasses import dataclass, field
 
 _DEBUG = os.environ.get("MIMI_STREAM_DEBUG", "").strip() not in ("", "0", "false", "False")
 
+# 已知 Whisper YouTube 训练数据残留的低能量幻觉短语
+# 来源：OpenAI/whisper#928 等社区 issue
+_HALLUCINATION_PHRASES = {
+    "thank you.", "thank you", "thanks for watching.", "thanks for watching",
+    "thanks.", "thanks", "bye.", "bye", "bye-bye.", "bye-bye",
+    "you.", "you", "okay.", "okay",
+    "danke.", "danke", "tschüss.", "tschüss",
+    ".", "。",
+}
+# 真实 "Thank you." 时长约 0.45-0.8s；< 0.6s 又匹配黑名单 = 几乎可确认幻觉
+_PHRASE_DURATION_MAX = 0.6
+
+# Char-level repetition: 单 segment 内 1-4 字符 N-gram 连续重复 ≥ 8 次 = 幻觉
+# 例: "ALALALALALALALALAL..." 或 "aaaaaaaa..."。L3 词级 filter 看不到这种内部重复
+_CHAR_REPEAT_MIN_RUN = 8
+
+
+def _is_char_repetition(text: str, min_run: int = _CHAR_REPEAT_MIN_RUN) -> bool:
+    """检测 'ALALALAL...' / 'aaaaaaaa...' / 'haha haha ...' 类字符级 N-gram 重复。
+
+    去空格后，对每个 size in (1, 2, 3, 4) 跑滑窗：找连续重复 ≥ min_run 次的 N-gram。
+    """
+    s = text.replace(" ", "").lower()
+    if len(s) < min_run * 2:
+        return False
+    for size in (1, 2, 3, 4):
+        for i in range(len(s) - size * min_run + 1):
+            chunk = s[i:i + size]
+            if not chunk:
+                continue
+            run = 1
+            j = i + size
+            while j + size <= len(s) and s[j:j + size] == chunk:
+                run += 1
+                j += size
+            if run >= min_run:
+                return True
+    return False
+
 
 def _debug(msg: str) -> None:
     if _DEBUG:
@@ -60,6 +99,10 @@ class StreamingSTT:
     SILENCE_THRESHOLD = 0.01   # RMS 低于此值认为是静音（float32 [-1,1]，约 -40dB）
     # Voice Processing (AEC+NS) 在前端已过滤回声和噪音，这里只拦截纯数字静音
     SILENCE_FLUSH_SECONDS = 3.0  # 连续静音超过此时长自动 flush buffer
+    # 幻觉污染保护（filter 全砍后清理 buffer，避免污染后续真实语音）
+    NO_SPEECH_PROB_CUT = 0.6      # Whisper 自标 no_speech_prob > 此值 → 精确切到段尾
+    EMPTY_FILTER_STREAK_LIMIT = 3  # 连续 N 轮 filter 全砍 → 兜底强 reset
+    POLLUTION_RETAIN_SEC = 1.5    # 强 reset 时尾部保留秒数（防止刚开口的真实语音被误删）
 
     def __init__(self, stt, sample_rate: int = 16000):
         """
@@ -76,6 +119,8 @@ class StreamingSTT:
         self.buffer_offset: float = 0.0
         self.last_language: str = "unknown"
         self.silence_duration: float = 0.0  # 连续静音累计时长
+        # 连续 filter 全砍计数器：达到 EMPTY_FILTER_STREAK_LIMIT 触发 buffer 强 reset
+        self._empty_after_filter_streak: int = 0
         # debug only
         self._real_time: float = 0.0  # 累计喂入音频的真实时长（含跳过的静音）
         self._vad_skip_count: int = 0
@@ -123,12 +168,53 @@ class StreamingSTT:
         # 在整个 buffer 上跑 Whisper
         result = self.stt.transcribe_audio(self.buffer)
         self.last_language = result.get("language", self.last_language)
+        raw_segments = result["segments"]  # 用 raw 区分"真静默"vs"被过滤"
+        # 后置过滤：L2 paper §4.5 combo gate + L4 短促 blacklist
+        result["segments"] = self._drop_hallucinations(raw_segments)
         words = self._flatten_words(result["segments"])
         words = self._filter_repetitions(words)  # 砍掉 "woo woo woo" 类幻觉
 
         if not words:
-            # buffer 全是静音 — 不动 last_words，也不发任何东西
+            # 区分两种情况：
+            # (a) Whisper 完全没产 word（真静默）→ 不动 buffer，留给 silence_flush 路径
+            # (b) Whisper 产了但被 _drop_hallucinations / _filter_repetitions 砍光
+            #     → 这是污染，必须切 buffer，否则下次真实语音被卡到 25s force_commit
+            raw_words_existed = any(seg.get("words") for seg in raw_segments)
+            if raw_words_existed:
+                self._empty_after_filter_streak += 1
+
+                # 策略 A：Whisper 自己标了高 no_speech_prob 的 segment → 精确切到段尾
+                # 这是 Whisper 自己提供的边界，无信息损失
+                cut_to = 0.0
+                for seg in raw_segments:
+                    if seg.get("no_speech_prob", 0.0) > self.NO_SPEECH_PROB_CUT:
+                        cut_to = max(cut_to, float(seg["end"]))
+                if cut_to > 0:
+                    cut_samples = min(int(cut_to * self.sample_rate), len(self.buffer))
+                    self.buffer = self.buffer[cut_samples:]
+                    self.buffer_offset += cut_to
+                    self.last_words = []
+                    _debug(f"t={self._real_time:6.2f}s NO_SPEECH_CUT to {cut_to:.2f}s "
+                           f"(buf now {len(self.buffer)/self.sample_rate:.2f}s)")
+
+                # 策略 B：连续 N 轮 filter 全砍 → 兜底强 reset（处理"自信幻觉"如 ALALAL...）
+                elif self._empty_after_filter_streak >= self.EMPTY_FILTER_STREAK_LIMIT:
+                    retain_samples = int(self.POLLUTION_RETAIN_SEC * self.sample_rate)
+                    if len(self.buffer) > retain_samples:
+                        dropped = (len(self.buffer) - retain_samples) / self.sample_rate
+                        self.buffer = self.buffer[-retain_samples:]
+                        self.buffer_offset += dropped
+                        self.last_words = []
+                        _debug(f"t={self._real_time:6.2f}s POLLUTION_RESET "
+                               f"dropped={dropped:.2f}s kept={self.POLLUTION_RETAIN_SEC}s")
+                    self._empty_after_filter_streak = 0
+            else:
+                # 真静默（Whisper 完全没产 segment.words）→ 重置 streak，让 silence_flush 接管
+                self._empty_after_filter_streak = 0
             return StreamResult(language=self.last_language)
+        else:
+            # 任何成功一帧都重置 streak
+            self._empty_after_filter_streak = 0
 
         # === LocalAgreement-2 ===
         # 找当前 hypothesis 和上次 hypothesis 的最长公共前缀（按 word 比较）
@@ -209,6 +295,8 @@ class StreamingSTT:
 
         result = self.stt.transcribe_audio(self.buffer)
         self.last_language = result.get("language", self.last_language)
+        # 跟 feed() 对称：flush 路径也走幻觉过滤
+        result["segments"] = self._drop_hallucinations(result["segments"])
         words = self._flatten_words(result["segments"])
         words = self._filter_repetitions(words)
 
@@ -271,6 +359,42 @@ class StreamingSTT:
             else:
                 break
         return n
+
+    @staticmethod
+    def _drop_hallucinations(segments: list) -> list:
+        """三层后置过滤：
+        - L2: combo gate (Whisper paper §4.5 needs_fallback)。avg_logprob < -1.0
+              OR compression_ratio > 2.4 → drop。OR 比 AND 更激进，能拦住
+              "Whisper 高自信吐垃圾"（高 cr，中等 alp）的语言错位 case。阈值
+              取 paper 默认 -1.0 / 2.4。正常英语 cr 约 1.4-1.8，不会误杀。
+        - L5: char-level repetition (新加)。L3 是词级，看不到单 word 内部
+              "ALALALAL..." 这种字符 N-gram 重复。这里整段 segment 直接砍掉。
+        - L4: phrase blacklist + duration heuristic。命中已知 YouTube 训练
+              数据残留短语且 segment 时长 < 0.6s（真实 "Thank you." 约
+              0.45-0.8s）→ 视作咳嗽 / 静默 + Whisper 自动补 "Thank you" 幻觉。
+        """
+        out = []
+        for seg in segments:
+            alp = seg.get("avg_logprob", 0.0)
+            cr = seg.get("compression_ratio", 1.0)
+            if alp < -1.0 or cr > 2.4:
+                _debug(f"[hallu-L2] drop alp={alp:.2f} cr={cr:.2f} "
+                       f"text={seg['text'][:60]!r}")
+                continue
+
+            if _is_char_repetition(seg["text"]):
+                _debug(f"[hallu-L5] drop char-repeat text={seg['text'][:60]!r}")
+                continue
+
+            text_norm = seg["text"].strip().lower()
+            if text_norm in _HALLUCINATION_PHRASES:
+                duration = float(seg["end"]) - float(seg["start"])
+                if duration < _PHRASE_DURATION_MAX:
+                    _debug(f"[hallu-L4] drop dur={duration:.2f}s "
+                           f"text={text_norm!r}")
+                    continue
+            out.append(seg)
+        return out
 
     @classmethod
     def _filter_repetitions(cls, words: list, max_repeat: int = 4) -> list:

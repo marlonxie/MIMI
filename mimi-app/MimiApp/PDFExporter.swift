@@ -19,8 +19,9 @@ final class PDFExporter: NSObject, WKNavigationDelegate {
             self.continuation = cont
             webView.loadHTMLString(html, baseURL: nil)
         }
+        // rect = nil 时 WebKit 用 CSS @page 自动分页输出多页 PDF。
+        // 设了 rect 会被理解成单页快照，多余内容被截掉（之前的 bug）。
         let cfg = WKPDFConfiguration()
-        cfg.rect = CGRect(x: 0, y: 0, width: 612, height: 792)
         let data = try await webView.pdf(configuration: cfg)
         try data.write(to: url)
     }
