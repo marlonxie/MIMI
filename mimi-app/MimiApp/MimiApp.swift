@@ -514,6 +514,9 @@ class AppState {
     var translationReady: Bool = false
     var ragReady: Bool = false
     var ragLoaded: Bool = false
+    /// 后端实际生效的 provider（status / api_keys_ack 推送）。和 llmProvider（picker
+    /// 选择 + UserDefaults）解耦：用户选了 X 但没点 apply 时两者会不同。
+    var activeProvider: String = ""
 
     // 已上传参考资料清单（resources_list 推送回来填充；用户在 Settings → 参考资料 tab 看到）
     var resources: [ResourceFile] = []
@@ -754,6 +757,7 @@ class AppState {
             self.translationReady = msg.translatorReady
             self.ragReady = msg.ragReady
             self.ragLoaded = msg.ragLoaded
+            self.activeProvider = msg.activeProvider
             // 智能分流：仅在后端 not_ready && Keychain 有 key 时被动推送
             if !msg.translatorReady, let stored = Keychain.load(key: self.llmProvider) {
                 self.apiKey = stored
@@ -765,6 +769,7 @@ class AppState {
             guard let self else { return }
             self.translationReady = msg.translatorReady
             self.ragReady = msg.ragReady
+            self.activeProvider = msg.provider
         }
 
         // 导出对话记录 ack：弹 alert 显示路径 + "在 Finder 中显示"

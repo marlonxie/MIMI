@@ -93,8 +93,32 @@ struct SettingsView: View {
                 Text("Anthropic Claude").tag("claude")
                 Text(appState.t("settings.api.local")).tag("ollama")
             }
-            .onChange(of: appState.llmProvider) { _, _ in
+            .onChange(of: appState.llmProvider) { _, newValue in
                 appState.loadApiKeyForCurrentProvider()
+                // 本地 provider 没有 key 要保存，"保存并应用"按钮反而费解 — 选了即应用。
+                // 远程 provider 仍要走"粘 key → apply"流程，因为没 key 后端会拒绝。
+                if newValue == "ollama" {
+                    appState.applyApiKey()
+                }
+            }
+
+            // picker 与 backend 实际 active_provider 不一致时的橙色提示。
+            // 触发场景：用户改了 picker 但还没 apply；或后端启动时缺 key 走 ollama fallback
+            // 但前端 UserDefaults 仍记得上次选的 gemini。
+            if !appState.activeProvider.isEmpty
+               && appState.activeProvider != appState.llmProvider {
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(String(format: appState.t("settings.api.activeProvider"),
+                                    providerDisplayName(appState.activeProvider)))
+                            .font(.caption)
+                        Text(appState.t("settings.api.providerMismatch"))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
 
             if appState.llmProvider == "ollama" {
@@ -130,7 +154,12 @@ struct SettingsView: View {
                     }
                 }
 
-                if appState.translationReady && appState.apiKey.isEmpty {
+                // ".env 已配置就绪" 只在 picker 与 backend 一致时显示 — 否则会误导
+                // （比如 backend 是 ollama fallback，picker 是 gemini 空 key，旧逻辑会
+                // 错误地说"gemini .env 已就绪"）。不一致的情况由上方 mismatch 提示处理。
+                if appState.translationReady
+                   && appState.apiKey.isEmpty
+                   && appState.activeProvider == appState.llmProvider {
                     HStack(alignment: .top, spacing: 6) {
                         Image(systemName: "info.circle").foregroundStyle(.blue)
                         Text(appState.t("settings.api.envHint"))
@@ -144,6 +173,14 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    /// 把 backend 返回的裸 provider id 转成本地化的显示名（供 mismatch 提示用）。
+    /// 未知 provider 直接返回 id，至少不会丢信息。
+    private func providerDisplayName(_ provider: String) -> String {
+        let key = "settings.api.providerName.\(provider)"
+        let resolved = appState.t(key)
+        return resolved == key ? provider : resolved
     }
 }
 
