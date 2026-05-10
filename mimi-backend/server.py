@@ -109,6 +109,10 @@ async def websocket_endpoint(websocket: WebSocket):
 
     主循环只做消息分发，音频处理由 AudioSource 的独立协程完成。
     """
+    # 多个 elif 分支会写 rag_engine / intent_classifier；Python 静态分析要求
+    # global 声明必须在任何使用之前出现，所以集中在函数顶部声明一次。
+    global rag_engine, intent_classifier
+
     await websocket.accept()
     sample_rate = config["audio"]["sample_rate"]
 
@@ -159,9 +163,65 @@ async def websocket_endpoint(websocket: WebSocket):
                     filepath = shared_history.export_transcript(output_path=requested_path)
                     await websocket.send_json({"type": "export_ack", "path": filepath})
 
+                elif msg_type == "list_resources":
+                    from rag.resources import list_resources
+                    rsrc_dir = Path(config["rag"]["resources_path"]).expanduser()
+                    await websocket.send_json({
+                        "type": "resources_list",
+                        "files": list_resources(rsrc_dir),
+                    })
+
+                elif msg_type == "delete_resource":
+                    # 删完触发 reindex，复用 rebuild_index 的 release+rebuild 模式
+                    from rag.resources import delete_resource
+                    name = data.get("name", "")
+                    rsrc_dir = Path(config["rag"]["resources_path"]).expanduser()
+                    ok, reason = delete_resource(rsrc_dir, name)
+                    if not ok:
+                        print(f"[resources] delete failed: name={name!r} reason={reason}")
+                        await websocket.send_json({
+                            "type": "delete_resource_ack",
+                            "ok": False,
+                            "error": reason,
+                        })
+                    else:
+                        try:
+                            from rag.indexer import RAGIndexer
+                            from rag.engine import RAGEngine
+                            if rag_engine is not None:
+                                rag_engine.release_index()
+                            indexer = RAGIndexer()
+                            _, files_count = indexer.index()
+                            if rag_engine is not None and files_count > 0:
+                                rag_engine.reload_index()
+                            elif rag_engine is None and files_count > 0:
+                                rag_engine = RAGEngine(llm_manager, config_path)
+                                if intent_classifier is None:
+                                    intent_classifier = IntentClassifier(llm_manager)
+                            await websocket.send_json({
+                                "type": "delete_resource_ack",
+                                "ok": True,
+                                "remaining": files_count,
+                            })
+                        except Exception as e:
+                            await websocket.send_json({
+                                "type": "delete_resource_ack",
+                                "ok": False,
+                                "error": str(e),
+                            })
+
+                elif msg_type == "clear_resources":
+                    from rag.resources import clear_resources
+                    rsrc_dir = Path(config["rag"]["resources_path"]).expanduser()
+                    chroma_dir = Path(config["rag"]["chroma_path"]).expanduser()
+                    if rag_engine is not None:
+                        rag_engine.release_index()
+                        rag_engine = None
+                    clear_resources(rsrc_dir, chroma_dir)
+                    await websocket.send_json({"type": "clear_resources_ack"})
+
                 elif msg_type == "rebuild_index":
                     # 前端上传 RAG 资料后触发：跑 indexer + 让 RAG engine 重新加载向量库
-                    global rag_engine, intent_classifier
                     try:
                         from rag.indexer import RAGIndexer
                         from rag.engine import RAGEngine

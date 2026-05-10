@@ -211,13 +211,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         // 触发后端重建索引；ack 由 AppState.setupCallbacks.onRebuildIndexAck 接到后弹完成提示
+        // 不弹中间态（"正在处理"提示已被精简掉）：runModal 阻塞会卡住主线程，
+        // 而后端 ack 通常 1-3s 内就会回来，直接等 ack 弹一次完成提示更顺畅。
         appState?.wsClient.sendRebuildIndex()
-
-        // 立即弹"正在索引"提示（不阻塞，等 ack 时再弹完成提示）
-        let alert = NSAlert()
-        alert.messageText = String(format: L.t("upload.alert.indexing", lang: lang), copied)
-        alert.informativeText = ""
-        alert.runModal()
     }
 
     // MARK: Panel 创建
@@ -519,6 +515,10 @@ class AppState {
     var ragReady: Bool = false
     var ragLoaded: Bool = false
 
+    // 已上传参考资料清单（resources_list 推送回来填充；用户在 Settings → 参考资料 tab 看到）
+    var resources: [ResourceFile] = []
+    var isClearingResources: Bool = false  // clear 期间禁用按钮防双击
+
     let wsClient = WebSocketClient()
     let audioCapture = AudioCaptureManager()
     weak var appDelegate: AppDelegate?
@@ -796,6 +796,37 @@ class AppState {
                 self.ragLoaded = msg.count > 0
             }
             alert.runModal()
+            // 上传完刷新参考资料清单
+            self.wsClient.sendListResources()
+        }
+
+        // 参考资料清单推送：填充 AppState.resources，触发 Settings 列表重渲染
+        wsClient.onResourcesList = { [weak self] msg in
+            self?.resources = msg.files
+        }
+
+        // 单文件删除 ack：失败时弹错误提示；成功时刷新清单 + 同步 ragLoaded
+        wsClient.onDeleteResourceAck = { [weak self] msg in
+            guard let self else { return }
+            if !msg.ok {
+                let alert = NSAlert()
+                alert.messageText = String(
+                    format: self.t("resources.deleteFailed"),
+                    msg.error ?? "")
+                alert.alertStyle = .warning
+                alert.runModal()
+            } else {
+                self.ragLoaded = (msg.remaining ?? 0) > 0
+                self.wsClient.sendListResources()
+            }
+        }
+
+        // 清空 ack：刷新清单（应该返回空），重置 ragLoaded
+        wsClient.onClearResourcesAck = { [weak self] _ in
+            guard let self else { return }
+            self.isClearingResources = false
+            self.ragLoaded = false
+            self.resources = []
         }
 
         // 连接建立后才能可靠发消息（sendJSON 有 isConnected 守卫）
@@ -806,6 +837,8 @@ class AppState {
                                          native: self.nativeLanguage)
             self.wsClient.sendSuggestionEnabled(self.suggestionEnabled)
             self.wsClient.sendQueryStatus()
+            // 拉一次参考资料清单（Settings 第一次打开 Resources tab 时立刻有数据）
+            self.wsClient.sendListResources()
         }
     }
 }

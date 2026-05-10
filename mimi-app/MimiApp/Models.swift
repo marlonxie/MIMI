@@ -85,6 +85,33 @@ struct RebuildIndexAckMessage: Codable {
     let error: String?
 }
 
+/// 已上传参考资料一项
+struct ResourceFile: Codable, Identifiable, Hashable {
+    let name: String
+    let size: Int64
+    let mtime: Double
+    var id: String { name }
+}
+
+/// list_resources 的回应
+struct ResourcesListMessage: Codable {
+    let type: String
+    let files: [ResourceFile]
+}
+
+/// delete_resource 的回应；ok=true 时 remaining 是删后的总数
+struct DeleteResourceAckMessage: Codable {
+    let type: String
+    let ok: Bool
+    let remaining: Int?
+    let error: String?
+}
+
+/// clear_resources 的回应（无需 payload）
+struct ClearResourcesAckMessage: Codable {
+    let type: String
+}
+
 // MARK: - Client Messages
 
 struct ConfigMessage: Codable {

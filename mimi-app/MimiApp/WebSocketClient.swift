@@ -13,6 +13,9 @@ class WebSocketClient {
     var onApiKeysAck: (@MainActor (ApiKeysAckMessage) -> Void)?
     var onExportAck: (@MainActor (ExportAckMessage) -> Void)?
     var onRebuildIndexAck: (@MainActor (RebuildIndexAckMessage) -> Void)?
+    var onResourcesList: (@MainActor (ResourcesListMessage) -> Void)?
+    var onDeleteResourceAck: (@MainActor (DeleteResourceAckMessage) -> Void)?
+    var onClearResourcesAck: (@MainActor (ClearResourcesAckMessage) -> Void)?
 
     private var webSocket: URLSessionWebSocketTask?
     private var session: URLSession?
@@ -77,6 +80,18 @@ class WebSocketClient {
     func sendRebuildIndex() {
         struct RebuildMsg: Codable { let type: String }
         sendJSON(RebuildMsg(type: "rebuild_index"))
+    }
+    func sendListResources() {
+        struct ListMsg: Codable { let type: String }
+        sendJSON(ListMsg(type: "list_resources"))
+    }
+    func sendDeleteResource(name: String) {
+        struct DeleteMsg: Codable { let type: String; let name: String }
+        sendJSON(DeleteMsg(type: "delete_resource", name: name))
+    }
+    func sendClearResources() {
+        struct ClearMsg: Codable { let type: String }
+        sendJSON(ClearMsg(type: "clear_resources"))
     }
     func sendFlush() { sendJSON(ControlMessage.flush) }
     func sendLanguages(interview: String, native: String) {
@@ -159,6 +174,18 @@ class WebSocketClient {
         case "rebuild_index_ack":
             if let msg = try? JSONDecoder().decode(RebuildIndexAckMessage.self, from: data) {
                 onRebuildIndexAck?(msg)
+            }
+        case "resources_list":
+            if let msg = try? JSONDecoder().decode(ResourcesListMessage.self, from: data) {
+                onResourcesList?(msg)
+            }
+        case "delete_resource_ack":
+            if let msg = try? JSONDecoder().decode(DeleteResourceAckMessage.self, from: data) {
+                onDeleteResourceAck?(msg)
+            }
+        case "clear_resources_ack":
+            if let msg = try? JSONDecoder().decode(ClearResourcesAckMessage.self, from: data) {
+                onClearResourcesAck?(msg)
             }
         default:
             break

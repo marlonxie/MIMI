@@ -90,6 +90,13 @@ class RAGIndexer:
         print("MIMI RAG 文档索引")
         print("=" * 50)
 
+        # 清 chromadb 全局缓存，防止我们 rmtree 之后 Chroma.from_documents 命中
+        # 旧 SharedSystemClient 单例（指向已被 unlink 的 SQLite 文件），报
+        # SQLITE_READONLY_DBMOVED (code 1032)。RAGEngine.release_index() 也清，
+        # 这里再清一次是防御 indexer 单跑（如 CLI `python -m rag.indexer`）的场景。
+        from chromadb.api.client import SharedSystemClient
+        SharedSystemClient.clear_system_cache()
+
         # 清除旧索引（全量重建）
         chroma_dir = Path(self.chroma_path)
         if chroma_dir.exists():

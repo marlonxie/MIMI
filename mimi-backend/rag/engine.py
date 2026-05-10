@@ -128,14 +128,20 @@ class RAGEngine:
 
     def release_index(self) -> None:
         """释放 Chroma 持有的 SQLite handle，让 indexer 能 rmtree + 重建。
-        rebuild_index WS handler 在调 indexer.index() 之前必调，否则 indexer 的
-        shutil.rmtree(chroma_store) 会让老 handle 指向 unlinked inode，新建 chroma
-        时报 SQLITE_CANTOPEN (code 14)。
+        rebuild_index WS handler 在调 indexer.index() 之前必调。
+
+        两件事都要做：
+        1. 清掉自己的 retriever / vector_store 引用 + gc.collect → 析构 PersistentClient
+        2. 清 chromadb 全局 SharedSystemClient 缓存 — Chroma 内部按 persist_directory
+           cache 单例 client，gc 释放我们的引用后底层 client 还活在缓存里，rmtree 后
+           下次建 Chroma 复用 cache 里的死 handle，报 SQLITE_READONLY_DBMOVED (code 1032)。
         """
         import gc
+        from chromadb.api.client import SharedSystemClient
         self.retriever = None
         self.vector_store = None
-        gc.collect()  # 强制 chromadb.PersistentClient 析构 → SQLite 连接关闭
+        gc.collect()
+        SharedSystemClient.clear_system_cache()
 
     @property
     def is_ready(self) -> bool:
