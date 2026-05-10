@@ -151,29 +151,63 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         panel.title = L.t("upload.title", lang: lang)
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
-        panel.allowedContentTypes = [.pdf, .plainText, .text]
+        // 严格只允许后端 indexer 能解析的三种类型（rag/indexer.py LOADER_MAP 对齐）。
+        // 旧值 [.pdf, .plainText, .text] 太宽：UTType.text 是抽象基类，包括 HTML / 源代码 /
+        // 脚本等几乎所有文本派生类型，导致 .py / .swift / .json 都能选中。
+        panel.allowedContentTypes = [
+            .pdf,
+            UTType(filenameExtension: "md")!,
+            UTType(filenameExtension: "txt")!,
+        ]
 
         guard panel.runModal() == .OK else { return }
 
         // ~/Library/Application Support/MIMI/resources/ — macOS 标准 app 私有数据位置；
-        // 后端 indexer 同样从这个路径读，前后端路径对齐
+        // 后端 indexer 同样从这个路径读，前后端路径对齐。
         guard let support = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return }
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            let alert = NSAlert()
+            alert.messageText = L.t("upload.alert.failed", lang: lang)
+            alert.informativeText = "Application Support directory not found"
+            alert.alertStyle = .warning
+            alert.runModal()
+            return
+        }
         let resources = support.appendingPathComponent("MIMI/resources")
-        try? FileManager.default.createDirectory(at: resources,
-                                                  withIntermediateDirectories: true)
+
+        do {
+            try FileManager.default.createDirectory(
+                at: resources, withIntermediateDirectories: true)
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = L.t("upload.alert.failed", lang: lang)
+            alert.informativeText = error.localizedDescription
+            alert.alertStyle = .warning
+            alert.runModal()
+            return
+        }
 
         var copied = 0
+        var failures: [String] = []
         for src in panel.urls {
             let dst = resources.appendingPathComponent(src.lastPathComponent)
-            // 已存在则覆盖
-            try? FileManager.default.removeItem(at: dst)
+            try? FileManager.default.removeItem(at: dst)  // 已存在覆盖，失败也无所谓
             do {
                 try FileManager.default.copyItem(at: src, to: dst)
                 copied += 1
             } catch {
-                print("复制文件失败: \(src.lastPathComponent) — \(error)")
+                failures.append("\(src.lastPathComponent): \(error.localizedDescription)")
             }
+        }
+
+        if !failures.isEmpty {
+            let alert = NSAlert()
+            alert.messageText = String(format: L.t("upload.alert.partial", lang: lang),
+                                       copied, panel.urls.count)
+            alert.informativeText = failures.joined(separator: "\n")
+            alert.alertStyle = .warning
+            alert.runModal()
+            if copied == 0 { return }
         }
 
         // 触发后端重建索引；ack 由 AppState.setupCallbacks.onRebuildIndexAck 接到后弹完成提示
@@ -372,13 +406,13 @@ struct MenuBarView: View {
             Button(appState.t("menu.export")) {
                 let panel = NSSavePanel()
                 panel.title = appState.t("export.savePanel.title")
-                panel.allowedContentTypes = [.json]
+                panel.allowedContentTypes = [.pdf]
                 panel.canCreateDirectories = true
                 let stamp = DateFormatter()
                 stamp.dateFormat = "yyyyMMdd_HHmmss"
-                panel.nameFieldStringValue = "interview_\(stamp.string(from: Date())).json"
+                panel.nameFieldStringValue = "interview_\(stamp.string(from: Date())).pdf"
                 if panel.runModal() == .OK, let url = panel.url {
-                    appState.wsClient.sendExport(path: url.path)
+                    Task { await appState.exportTranscriptPDF(to: url) }
                 }
             }
 
@@ -553,6 +587,97 @@ class AppState {
             isSystemAudioEnabled = audioCapture.isSystemAudioRunning
         }
         flushIfBothOff()
+    }
+
+    // MARK: - PDF 导出
+
+    /// 把当前 translations（最终态，按 sentenceId 索引）渲染成 HTML 后用 WKWebView 导成 PDF。
+    /// 写入用户在 NSSavePanel 选定的路径。后端 history.export_transcript 不走这条
+    /// （后端 SharedHistory 不存 translation；前端是唯一同时持有原文 + 译文的来源）。
+    func exportTranscriptPDF(to url: URL) async {
+        let html = buildTranscriptHTML()
+        do {
+            let exporter = PDFExporter()
+            try await exporter.export(html: html, to: url)
+            let alert = NSAlert()
+            alert.messageText = self.t("export.success")
+            alert.informativeText = url.path
+            alert.addButton(withTitle: self.t("export.revealInFinder"))
+            alert.addButton(withTitle: self.t("export.ok"))
+            if alert.runModal() == .alertFirstButtonReturn {
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            }
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = self.t("export.failed")
+            alert.informativeText = error.localizedDescription
+            alert.alertStyle = .warning
+            alert.runModal()
+        }
+    }
+
+    private func buildTranscriptHTML() -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        let dateStr = formatter.string(from: Date())
+
+        let interviewerLabel = self.t("export.pdf.interviewer")
+        let meLabel = self.t("export.pdf.me")
+
+        var rows = ""
+        for entry in translations where entry.isTranscriptFinal {
+            let speakerClass = entry.speaker == "interviewer" ? "interviewer" : "me"
+            let label = entry.speaker == "interviewer" ? interviewerLabel : meLabel
+            rows += """
+            <div class="turn \(speakerClass)">
+              <h2>\(entry.timestamp) — \(label)</h2>
+              <p class="original" lang="\(interviewLanguage)">\(htmlEscape(entry.original))</p>
+            """
+            if !entry.translation.isEmpty {
+                rows += """
+                  <p class="translation" lang="\(nativeLanguage)">\(htmlEscape(entry.translation))</p>
+                """
+            }
+            rows += "</div>\n"
+        }
+
+        return """
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <style>
+            @page { margin: 0.75in; }
+            body { font-family: -apple-system, "PingFang SC", sans-serif; line-height: 1.6; color: #1a1a1a; }
+            h1 { font-size: 22px; border-bottom: 2px solid #0a84ff; padding-bottom: 6px; margin-top: 0; }
+            .meta { color: #666; font-size: 11px; margin-bottom: 20px; }
+            .turn { margin: 16px 0; padding: 0 0 0 12px; border-left: 3px solid #ddd; page-break-inside: avoid; }
+            .turn.interviewer { border-left-color: #0a84ff; }
+            .turn.me { border-left-color: #30d158; }
+            .turn h2 { font-size: 13px; margin: 0 0 6px; color: #444; font-weight: 600; }
+            .original { color: #1a1a1a; margin: 4px 0; font-size: 13px; }
+            .translation { color: #666; margin: 4px 0; font-style: italic; font-size: 13px; }
+          </style>
+        </head>
+        <body>
+          <h1>\(self.t("export.pdf.title"))</h1>
+          <div class="meta">
+            \(self.t("export.pdf.date")): \(dateStr) ·
+            \(self.t("export.pdf.count")): \(translations.count) ·
+            \(self.t("export.pdf.interviewLang")): \(interviewLanguage) ·
+            \(self.t("export.pdf.nativeLang")): \(nativeLanguage)
+          </div>
+          \(rows)
+        </body>
+        </html>
+        """
+    }
+
+    private func htmlEscape(_ s: String) -> String {
+        s.replacingOccurrences(of: "&", with: "&amp;")
+         .replacingOccurrences(of: "<", with: "&lt;")
+         .replacingOccurrences(of: ">", with: "&gt;")
     }
 
     /// 两路都关时让后端把 pending 的最后半句强制提交（避免"半句飘着"）。

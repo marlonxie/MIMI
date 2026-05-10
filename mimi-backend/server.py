@@ -166,6 +166,12 @@ async def websocket_endpoint(websocket: WebSocket):
                         from rag.indexer import RAGIndexer
                         from rag.engine import RAGEngine
                         print("[index] 重建中...")
+                        # 关键：indexer 会 rmtree chroma_store 整个目录。如果 RAGEngine
+                        # 已经持有 Chroma 实例（lifespan 启动加载或前一次 rebuild 创建过），
+                        # 老 SQLite handle 会被 unlink 后变 zombie，新 Chroma.from_documents
+                        # 报 SQLITE_CANTOPEN (code 14)。先释放老 handle 才能干净重建。
+                        if rag_engine is not None:
+                            rag_engine.release_index()
                         indexer = RAGIndexer()
                         _, files_count = indexer.index()
                         if rag_engine is None and files_count > 0:

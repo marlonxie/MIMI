@@ -95,6 +95,9 @@ class RAGIndexer:
         if chroma_dir.exists():
             shutil.rmtree(chroma_dir)
             print(f"已清除旧索引: {chroma_dir}")
+        # 重新创建空目录，否则 Chroma.from_documents 在不存在的目录下建 SQLite
+        # 会报 (code 14) unable to open database file
+        chroma_dir.mkdir(parents=True, exist_ok=True)
 
         # 加载文档
         print(f"\n从 {self.resources_path} 加载文档...")
