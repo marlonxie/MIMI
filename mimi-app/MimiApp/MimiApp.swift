@@ -32,6 +32,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var onboardingPanel: NSPanel?
     weak var appState: AppState?
 
+    /// PyInstaller backend 进程管家。Release build（.app 内含 backend）会 spawn；
+    /// Dev build（无 bundled backend）no-op，开发者手动 `python server.py`。
+    let backendLauncher = BackendLauncher()
+
+    override init() {
+        super.init()
+        // SwiftUI + MenuBarExtra app 的 applicationDidFinishLaunching 在 macOS 14+ 上不稳定
+        // 触发（依赖 NSApp 的 lifecycle 时序）。AppDelegate init 由 @NSApplicationDelegateAdaptor
+        // 在 SwiftUI App 创建期间确定性调用 — 这里 spawn backend 最稳。
+        // Process API 不依赖 NSApp 已 ready，可以在 main run loop 之前调。
+        backendLauncher.start()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        backendLauncher.stop()
+    }
+
     /// 创建（如未创建）+ 显示三个 panel。AppState 的 captionsVisible/suggestionVisible 决定子窗是否一同打开。
     func showAllPanels(appState: AppState) {
         self.appState = appState

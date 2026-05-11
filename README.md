@@ -114,19 +114,35 @@ Or skip `.env` and set the key in the Settings UI (Cmd+,) at runtime — keys ar
 ### Continue setup
 
 ```bash
-# 3. (Optional) Drop your resume / prep docs into resources/ and index for RAG
-mkdir -p resources
-# ...add your .md / .pdf / .txt files...
-cd mimi-backend && python -m rag.indexer
-
-# 4. Start backend
-python server.py
+# 3. Start backend
+cd mimi-backend && python server.py
 # WebSocket on ws://127.0.0.1:8765
 
-# 5. Build & run the Swift app
+# 4. Build & run the Swift app
 open ../mimi-app/MimiApp.xcodeproj
 # Grant microphone + screen recording permissions when prompted
 ```
+
+### (Optional) Upload reference files for AI suggestions
+
+In the running app: click the upload icon in the Hub bar (or open Settings → 参考资料 tab) and pick your résumé / project notes (`.pdf` / `.md` / `.txt`). The backend re-indexes automatically; suggestions will cite these files.
+
+The Settings → 参考资料 tab also shows what's currently uploaded with per-file delete and a "clear all" button.
+
+CLI alternative (advanced, e.g. for batch indexing): drop files into `~/Library/Application Support/MIMI/resources/` and run `cd mimi-backend && python -m rag.indexer`.
+
+### Where your data lives
+
+All user data — uploaded reference files, RAG vector index, exported transcripts — lives under `~/Library/Application Support/MIMI/`:
+
+```
+~/Library/Application Support/MIMI/
+├── resources/      ← uploaded PDFs / Markdown / text
+├── chroma_store/   ← RAG vector index (rebuilt from resources/)
+└── transcripts/    ← default export location (UI export goes wherever you choose)
+```
+
+API keys are stored separately in macOS Keychain. To wipe everything: quit the app, then delete the `MIMI` folder and remove keys from Keychain Access.
 
 ## Configuration
 

@@ -55,6 +55,7 @@
 				378D1DEF2F7571CB0021BBAF /* Sources */,
 				378D1DF02F7571CB0021BBAF /* Frameworks */,
 				378D1DF12F7571CB0021BBAF /* Resources */,
+				378D1E102F7571CB0021BBAF /* Copy mimi-backend */,
 			);
 			buildRules = (
 			);
@@ -114,6 +115,27 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		378D1E102F7571CB0021BBAF /* Copy mimi-backend */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Copy mimi-backend";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/bash;
+			shellScript = "set -e\nBACKEND_SRC=\"$SRCROOT/../mimi-backend/dist/mimi-backend\"\nBACKEND_DST=\"$BUILT_PRODUCTS_DIR/$PRODUCT_NAME.app/Contents/Resources/mimi-backend\"\n\nif [ ! -d \"$BACKEND_SRC\" ]; then\n    echo \"warning: $BACKEND_SRC not found — Debug build will fall back to manual 'python server.py'\"\n    echo \"For Release: run 'cd mimi-backend && pyinstaller mimi-backend.spec --clean -y' first.\"\n    exit 0\nfi\n\necho \"Copying mimi-backend into .app bundle (~607MB)...\"\nrm -rf \"$BACKEND_DST\"\nmkdir -p \"$BACKEND_DST\"\nditto \"$BACKEND_SRC\" \"$BACKEND_DST\"\nchmod +x \"$BACKEND_DST/mimi-backend\"\n\n# Codesign — PyInstaller 自己已经 ad-hoc 签过所有 dylib + 主二进制。\n# 用 Apple Development 重签会和 Hardened Runtime + Library Validation 冲突，\n# 导致 backend 启动时被 amfid SIGKILL（exit 137）。\n# 解法：只签外层 backend 主二进制（保留原 ad-hoc 内嵌 dylib），并显式禁用 Library Validation。\n# 朋友走 brew cask 路径，不要求 notarize；Gatekeeper 会被 brew strip quarantine。\nif [ -n \"$EXPANDED_CODE_SIGN_IDENTITY\" ]; then\n    echo \"Signing backend launcher (preserving inner ad-hoc dylibs)\"\n    codesign --force --sign \"$EXPANDED_CODE_SIGN_IDENTITY\" \\\n        --entitlements \"$SRCROOT/MimiApp/MimiBackend.entitlements\" \\\n        --timestamp=none \\\n        \"$BACKEND_DST/mimi-backend\"\nfi\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		378D1DEF2F7571CB0021BBAF /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -163,7 +185,7 @@
 				DEVELOPMENT_TEAM = 4S48F7N688;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -227,7 +249,7 @@
 				DEVELOPMENT_TEAM = 4S48F7N688;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;

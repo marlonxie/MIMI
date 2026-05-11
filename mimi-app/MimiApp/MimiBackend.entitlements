@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- PyInstaller bundle 内嵌的 dylib 是 ad-hoc 签名；外层 mimi-backend 用 Apple
+         Development 重签后，Library Validation 默认会拒绝 dlopen 不同签发者的 dylib。
+         禁用 LV 让 PyInstaller 的 ad-hoc dylib 能正常加载。-->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <!-- mlx-whisper / chromadb 等 deps 含 JIT (mlx) + 大量动态加载，允许未签名内存执行 -->
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <!-- pyinstaller bootloader 走 dlopen 动态库；允许动态链接 -->
+    <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+    <true/>
+</dict>
+</plist>
