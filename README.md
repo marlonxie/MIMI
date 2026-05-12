@@ -106,13 +106,16 @@ open -a MIMI
 2. Drag `/Applications/MIMI.app` to the Trash.
 3. *(Optional)* Remove ~3.5 GB of cached models and uploaded data:
    ```bash
+   # MIMI's own data (Qwen3 ~2.6GB, ChromaDB, uploaded resources, transcripts)
    rm -rf ~/Library/Application\ Support/MIMI
-   rm -rf ~/Library/Caches/huggingface
+   # MIMI's HuggingFace models only — keeps your other HF projects' cache intact
+   rm -rf ~/.cache/huggingface/hub/models--mlx-community--whisper-small-mlx
+   rm -rf ~/.cache/huggingface/hub/models--sentence-transformers--all-MiniLM-L6-v2
    rm -rf ~/Library/Logs/MIMI
    rm -f  ~/Library/Preferences/com.marlon.MimiApp.plist
    defaults delete com.marlon.MimiApp 2>/dev/null
    ```
-4. *Or* drag MIMI.app onto [AppCleaner](https://freemacsoft.net/appcleaner/) (free, GUI) — it auto-detects all related files.
+4. *Or* drag MIMI.app onto [AppCleaner](https://freemacsoft.net/appcleaner/) (free, GUI) — it auto-detects related files (but won't find the HF cache; clean it manually with the commands above if you want every byte gone).
 
 API keys are stored in macOS Keychain; remove via Keychain Access → search "MIMI".
 
@@ -184,7 +187,7 @@ All user data lives under `~/Library/Application Support/MIMI/`:
 └── transcripts/      ← default export location (UI export goes wherever you choose)
 ```
 
-Whisper model (~500MB) lives under `~/Library/Caches/huggingface/`. API keys in macOS Keychain.
+Whisper model (~500MB) + sentence-transformer embedding (~90MB) live under `~/.cache/huggingface/hub/` (shared with any other HuggingFace tool on your machine). API keys in macOS Keychain.
 
 ## Configuration
 
