@@ -112,6 +112,17 @@ struct ClearResourcesAckMessage: Codable {
     let type: String
 }
 
+/// 启动 / 首次安装时模型下载进度（ollama pull Qwen3 / HF Hub Whisper）。
+/// 后端通过 broadcast_model_progress 把 ollama /api/pull 流推过来；
+/// 前端 onboarding Step 0 显示进度条。
+struct ModelLoadingMessage: Codable {
+    let type: String         // "model_loading"
+    let model: String        // "qwen3" / "whisper"
+    let completed: Int64     // 已下载字节
+    let total: Int64         // 总字节
+    let status: String       // ollama 的 status 文案：pulling manifest / downloading / verifying sha256 / writing manifest / ready / ...
+}
+
 // MARK: - Client Messages
 
 struct ConfigMessage: Codable {

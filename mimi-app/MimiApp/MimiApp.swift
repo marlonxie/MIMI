@@ -539,6 +539,21 @@ class AppState {
     var resources: [ResourceFile] = []
     var isClearingResources: Bool = false  // clear 期间禁用按钮防双击
 
+    /// 模型下载进度（onboarding Step 0 显示）。后端启动时拉 Qwen3 / Whisper 会广播
+    /// `model_loading` 消息填充这个字典。key 是模型名（"qwen3" / "whisper"），
+    /// value 是 (completed bytes, total bytes, status 文案)。
+    /// completed == total 且 status == "ready" 表示该模型已就绪。
+    struct ModelProgress: Equatable {
+        let completed: Int64
+        let total: Int64
+        let status: String
+        var fraction: Double {
+            total > 0 ? Double(completed) / Double(total) : 0
+        }
+        var isReady: Bool { completed >= total && total > 0 }
+    }
+    var modelProgress: [String: ModelProgress] = [:]
+
     let wsClient = WebSocketClient()
     let audioCapture = AudioCaptureManager()
     weak var appDelegate: AppDelegate?
@@ -853,6 +868,16 @@ class AppState {
             self.isClearingResources = false
             self.ragLoaded = false
             self.resources = []
+        }
+
+        // 后端拉模型进度（ollama pull Qwen3 / HF Whisper download）→ onboarding 显示
+        wsClient.onModelLoading = { [weak self] msg in
+            guard let self else { return }
+            self.modelProgress[msg.model] = ModelProgress(
+                completed: msg.completed,
+                total: msg.total,
+                status: msg.status
+            )
         }
 
         // 连接建立后才能可靠发消息（sendJSON 有 isConnected 守卫）

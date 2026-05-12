@@ -20,6 +20,13 @@ tmp_ret = collect_all('langchain_google_genai')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('langchain_anthropic')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+# sentence_transformers + transformers + torch — RAG embedding 必须，PyInstaller
+# 默认会漏（langchain_huggingface 走动态 import）。collect_all 把 .so / 数据文件全收。
+# bundle 增大 ~400MB，最终 .app ~1.4GB。后续可换 ollama embeddings 瘦身。
+tmp_ret = collect_all('sentence_transformers')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('langchain_huggingface')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 
 a = Analysis(
@@ -31,7 +38,8 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['torch', 'transformers', 'sklearn'],
+    # excludes 改回最小：scikit-learn 真的没用，可以省 ~100MB
+    excludes=['sklearn'],
     noarchive=False,
     optimize=0,
 )

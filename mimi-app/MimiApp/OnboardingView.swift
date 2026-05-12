@@ -117,7 +117,13 @@ struct OnboardingView: View {
 
             Spacer().frame(height: 8)
 
-            if appState.backendReady {
+            // 状态优先级：
+            // 1. 有模型在下载 → 显示进度条（占大头：首启 Qwen3 2.6GB / Whisper 500MB）
+            // 2. backend WS 已连 → 绿勾 "准备完成"
+            // 3. 等连接 → 旋转 spinner
+            if !modelsInProgress.isEmpty {
+                modelProgressView
+            } else if appState.backendReady {
                 HStack(spacing: 8) {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundStyle(Theme.systemGreen)
@@ -140,6 +146,53 @@ struct OnboardingView: View {
             }
         }
         .frame(maxWidth: .infinity)
+    }
+
+    /// 还在下载的模型（completed < total）
+    private var modelsInProgress: [(String, AppState.ModelProgress)] {
+        appState.modelProgress
+            .filter { !$0.value.isReady }
+            .sorted { $0.key < $1.key }
+            .map { ($0.key, $0.value) }
+    }
+
+    private var modelProgressView: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(modelsInProgress, id: \.0) { (name, p) in
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text(displayName(forModel: name))
+                            .font(Theme.bodyFont)
+                            .foregroundColor(Theme.labelPrimary)
+                        Spacer()
+                        Text("\(formatBytes(p.completed)) / \(formatBytes(p.total))")
+                            .font(.caption2)
+                            .foregroundColor(Theme.labelSecondary)
+                    }
+                    ProgressView(value: Double(p.completed), total: Double(max(p.total, 1)))
+                    if !p.status.isEmpty {
+                        Text(p.status)
+                            .font(.caption2)
+                            .foregroundColor(Theme.labelTertiary)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 20)
+    }
+
+    private func displayName(forModel name: String) -> String {
+        switch name {
+        case "qwen3": return "Qwen3 (本地 LLM)"
+        case "whisper": return "Whisper (语音识别)"
+        default: return name
+        }
+    }
+
+    private func formatBytes(_ bytes: Int64) -> String {
+        let mb = Double(bytes) / 1024 / 1024
+        if mb < 1024 { return String(format: "%.0f MB", mb) }
+        return String(format: "%.2f GB", mb / 1024)
     }
 
     // Step 1: Hub 8 个按钮

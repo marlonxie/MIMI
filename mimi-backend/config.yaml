@@ -28,6 +28,12 @@ translator:
   # claude: claude-sonnet-4-20250514
   model: "gemini-2.5-flash"
 
+llm:
+  # bundled ollama daemon 监听地址。BackendLauncher 起 ollama serve 时指定 OLLAMA_HOST=127.0.0.1:11435
+  # 避开默认 11434（用户机器可能已有自己的 brew ollama daemon）。
+  # 也可用环境变量 MIMI_OLLAMA_BASE_URL 覆盖（dev 走系统 ollama 时方便）。
+  ollama_base_url: "http://127.0.0.1:11435"
+
 conversation:
   # 上下文窗口大小（最近 N 句对话）
   context_window_size: 10

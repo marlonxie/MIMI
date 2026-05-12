@@ -2,6 +2,14 @@
 
 import asyncio
 import json
+import os
+import sys
+
+# PyInstaller frozen 环境下 stdout 默认 block-buffered（log 文件读不到实时进度）
+# line-buffered 让 backend.log 实时刷新，方便 BackendLauncher 看 ollama pull / 模型加载进度
+sys.stdout.reconfigure(line_buffering=True)
+sys.stderr.reconfigure(line_buffering=True)
+
 import numpy as np
 import yaml
 from contextlib import asynccontextmanager
@@ -31,7 +39,16 @@ with open(config_path) as f:
 _whisper_lock = asyncio.Lock()
 
 # LLM 状态管理（缺 key 时不抛异常，组件懒就绪等 set_api_keys）
-llm_manager = LLMManager(default_provider=config["translator"]["provider"])
+# ollama base URL：BackendLauncher 传 MIMI_OLLAMA_BASE_URL 覆盖（bundled 走 11435）；
+# 否则用 config.yaml 默认（dev 直接跑 server.py 时仍可走系统 ollama 默认 11434）。
+_ollama_base_url = os.environ.get(
+    "MIMI_OLLAMA_BASE_URL",
+    config.get("llm", {}).get("ollama_base_url"),
+)
+llm_manager = LLMManager(
+    default_provider=config["translator"]["provider"],
+    ollama_base_url=_ollama_base_url,
+)
 
 # 初始化引擎（全局单例，所有连接共享）
 stt = SpeechToText(config_path)
@@ -41,6 +58,99 @@ translator = Translator(llm_manager, config_path)
 rag_engine = None
 # Intent LLM gate（auto pipeline 第二层，跟 rag_engine 一起加载）
 intent_classifier = None
+
+# 当前活跃 WebSocket 连接 — 用于把 ollama pull 进度等系统状态广播给所有前端
+# 启动时 auto-pull Qwen3 可能在前端 WS 连接前就开始；后接的连接也能拿到最新进度（缓存在 last_model_progress）
+active_websockets: set[WebSocket] = set()
+last_model_progress: dict[str, dict] = {}  # model_name → {completed, total, status}
+
+
+async def broadcast_model_progress(model: str, completed: int, total: int, status: str):
+    """ollama pull / mlx-whisper download 时把进度推给所有连上的前端 onboarding。"""
+    msg = {
+        "type": "model_loading",
+        "model": model,
+        "completed": completed,
+        "total": total,
+        "status": status,
+    }
+    last_model_progress[model] = msg
+    dead = []
+    for ws in list(active_websockets):
+        try:
+            await ws.send_json(msg)
+        except Exception:
+            dead.append(ws)
+    for ws in dead:
+        active_websockets.discard(ws)
+
+
+async def ensure_ollama_model_pulled():
+    """启动后台任务：检测 Qwen3 是否已在 bundled ollama，缺失则 ollama pull
+    并把进度广播给前端。**仅在 active_provider 是 ollama 时跑**（用户配了 cloud key 不拉本地模型）。"""
+    print(f"[ollama] ensure_ollama_model_pulled triggered, active={llm_manager.active_provider}, base_url={llm_manager._ollama_base_url}")
+    if llm_manager.active_provider != "ollama":
+        print("[ollama] active_provider 非 ollama，跳过")
+        return
+    base_url = llm_manager._ollama_base_url
+    if not base_url:
+        print("[ollama] base_url 未配，跳过")
+        return
+    from llm.providers import default_model_for
+    target_model = default_model_for("ollama")
+
+    import httpx
+    # 等 daemon 起来（BackendLauncher 已经先起 ollama，这里再保险等一下）
+    for _ in range(30):
+        try:
+            async with httpx.AsyncClient() as c:
+                r = await c.get(f"{base_url}/api/version", timeout=2)
+                if r.status_code == 200:
+                    break
+        except Exception:
+            pass
+        await asyncio.sleep(1)
+    else:
+        print("[ollama] daemon 未就绪，跳过 model pull")
+        return
+
+    async with httpx.AsyncClient(timeout=None) as c:
+        # 列已装模型
+        try:
+            r = await c.get(f"{base_url}/api/tags", timeout=5)
+            installed = {m["name"] for m in r.json().get("models", [])}
+        except Exception as e:
+            print(f"[ollama] api/tags 失败: {e}")
+            return
+        if target_model in installed:
+            print(f"[ollama] {target_model} 已存在，跳过 pull")
+            return
+
+        print(f"[ollama] 拉模型 {target_model}（首次启动 ~2.6GB）...")
+        try:
+            async with c.stream(
+                "POST", f"{base_url}/api/pull",
+                json={"name": target_model},
+            ) as resp:
+                async for line in resp.aiter_lines():
+                    if not line:
+                        continue
+                    try:
+                        evt = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    status = evt.get("status", "")
+                    completed = int(evt.get("completed", 0))
+                    total = int(evt.get("total", 0))
+                    if total > 0:
+                        await broadcast_model_progress("qwen3", completed, total, status)
+            # 拉完
+            await broadcast_model_progress("qwen3", 1, 1, "ready")
+            print(f"[ollama] {target_model} pull 完成")
+        except Exception as e:
+            print(f"[ollama] pull 失败: {e}")
+
+
 
 
 @asynccontextmanager
@@ -76,6 +186,10 @@ async def lifespan(app):
         print("未找到 RAG 索引，前端上传 RAG 资料后会自动重建（rebuild_index）")
 
     print(f"服务运行在 {config['server']['host']}:{config['server']['port']}")
+
+    # 后台拉 Qwen3 模型（不阻塞 startup —— uvicorn 立刻接受 WS；前端 onboarding 拿进度）
+    asyncio.create_task(ensure_ollama_model_pulled())
+
     yield
 
 
@@ -114,6 +228,14 @@ async def websocket_endpoint(websocket: WebSocket):
     global rag_engine, intent_classifier
 
     await websocket.accept()
+    # 注册到 broadcast 列表 + 立刻推一次缓存的最新模型进度（onboarding 即用）
+    active_websockets.add(websocket)
+    for cached in last_model_progress.values():
+        try:
+            await websocket.send_json(cached)
+        except Exception:
+            pass
+
     sample_rate = config["audio"]["sample_rate"]
 
     # 共享对话历史（两路的句子都写入同一个 history）
@@ -414,6 +536,7 @@ async def websocket_endpoint(websocket: WebSocket):
         print(f"WebSocket 错误: {e}")
         import traceback; traceback.print_exc()
     finally:
+        active_websockets.discard(websocket)
         if suggestion_task and not suggestion_task.done():
             suggestion_task.cancel()
         if shared_history.history:

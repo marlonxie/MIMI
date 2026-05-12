@@ -10,13 +10,23 @@ cask "mimi" do
   depends_on macos: ">= :sequoia"
   depends_on arch: :arm64
   # 自动装 ollama daemon（朋友机器零配置跑本地 LLM）
-  depends_on cask: "ollama"
+  depends_on formula: "ollama"
 
   # bundle 内部叫 MimiApp.app；装到 /Applications/MIMI.app 给用户看
   app "MimiApp.app", target: "MIMI.app"
 
-  # 安装后跑：起 ollama daemon、拉 Qwen3 模型、预热 mlx-whisper
+  # 安装后跑：去 quarantine、起 ollama daemon、拉 Qwen3 模型、预热 mlx-whisper
   postflight do
+    # MIMI 用 Apple Development 个人证书签名，没经过 Apple notarization；
+    # macOS Gatekeeper 默认会弹 "无法验证" 警告。brew cask 装来的 app 我们
+    # 主动剥 quarantine extended attribute 让首次启动不弹（朋友体验更顺）。
+    # 永久解：申请 Apple Developer Program ($99/yr) + notarytool submit。
+    ohai "Removing quarantine attribute"
+    system_command "/usr/bin/xattr",
+                   args: ["-dr", "com.apple.quarantine", "#{appdir}/MIMI.app"],
+                   sudo: false,
+                   print_stderr: false
+
     ohai "Starting Ollama daemon"
     system_command "/opt/homebrew/bin/brew",
                    args: ["services", "start", "ollama"],

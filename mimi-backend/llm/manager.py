@@ -18,9 +18,19 @@ FALLBACK_LOCAL_PROVIDER = "ollama"
 class LLMManager:
     """LLM provider + api key 单例状态。"""
 
-    def __init__(self, default_provider: str = "gemini", default_model: str | None = None):
-        """构造时可指定 model 覆盖 PROVIDER_MAP 默认 (用于 bench 比较同 provider 不同 model)."""
+    def __init__(
+        self,
+        default_provider: str = "gemini",
+        default_model: str | None = None,
+        ollama_base_url: str | None = None,
+    ):
+        """构造时可指定 model 覆盖 PROVIDER_MAP 默认 (用于 bench 比较同 provider 不同 model)。
+
+        ollama_base_url: 走 bundled ollama 时传 "http://127.0.0.1:11435"；
+            None 让 langchain_ollama 走默认 localhost:11434（dev 走系统 ollama 时方便）。
+        """
         self._model_override = default_model
+        self._ollama_base_url = ollama_base_url
         self._keys: dict[str, str] = {}
         # 启动时从 env 读所有已知 provider 的 key（兼容 .env 开发者路径）
         for provider, info in PROVIDER_MAP.items():
@@ -65,5 +75,6 @@ class LLMManager:
             self.active_provider,
             api_key=self._keys.get(self.active_provider),
             model=self._model_override,
+            ollama_base_url=self._ollama_base_url,
             **kwargs,
         )

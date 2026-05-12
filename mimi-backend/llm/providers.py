@@ -38,13 +38,15 @@ PROVIDER_MAP: dict[str, dict] = {
 
 
 def create_llm(provider: str, api_key: str | None = None, model: str | None = None,
-               **kwargs):
+               ollama_base_url: str | None = None, **kwargs):
     """创建 LangChain Chat 模型实例。
 
     Args:
-        provider: PROVIDER_MAP 的 key（"gemini" / "claude"）
+        provider: PROVIDER_MAP 的 key（"gemini" / "claude" / "ollama"）
         api_key: 显式 key；None 时让 LangChain 走 env var 默认（兼容 .env 路径）
         model:   model id；None 用 PROVIDER_MAP[provider]["default_model"]
+        ollama_base_url: 当 provider="ollama" 时指定 daemon 地址（bundled ollama 走
+            非标 11435；None = 走 langchain_ollama 默认 localhost:11434）
         **kwargs: 透传给底层 ChatModel（例如 temperature=0）
     """
     if provider not in PROVIDER_MAP:
@@ -54,9 +56,12 @@ def create_llm(provider: str, api_key: str | None = None, model: str | None = No
     model = model or info["default_model"]
     if api_key and info["api_kwarg"]:
         kwargs[info["api_kwarg"]] = api_key
-    # Qwen3 默认 thinking 模式会拖慢 TTFT 数倍；翻译/intent 是短输出确定性任务，关掉
     if info["lc"] == "ollama":
+        # Qwen3 默认 thinking 模式会拖慢 TTFT 数倍；翻译/intent 是短输出确定性任务，关掉
         kwargs.setdefault("reasoning", False)
+        # 指向 bundled ollama daemon（11435 而非默认 11434）
+        if ollama_base_url:
+            kwargs.setdefault("base_url", ollama_base_url)
     # 显式 model_provider，避免 model 名含冒号（如 "qwen3:8b"）被 init_chat_model 误拆
     return init_chat_model(model, model_provider=info["lc"], **kwargs)
 

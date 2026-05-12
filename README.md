@@ -77,7 +77,48 @@ Manual override: click an interviewer subtitle row → 💡 icon appears → cli
   - **Local (default, recommended)** — Ollama daemon + Qwen3-4B-Instruct-2507 (zero API cost, offline, Apache 2.0)
   - Or cloud — Gemini / Claude API key
 
-## Setup
+## Install (for end users)
+
+**Requirements**: macOS 15+ (Sequoia / Tahoe) on Apple Silicon (M1 / M2 / M3 / M4).
+
+### Option 1: DMG (recommended, no terminal)
+
+1. Download the latest `MIMI-*.dmg` from [Releases](https://github.com/marlonxie/MIMI/releases/latest).
+2. Double-click the `.dmg` to mount it.
+3. Drag the **MIMI** icon to the **Applications** folder shortcut.
+4. **First launch**: right-click `/Applications/MIMI.app` → **Open** → click "Open" in the dialog (one-time Gatekeeper bypass; Apple Developer ID notarization on the roadmap).
+5. Onboarding shows download progress for the local Qwen3 model (~2.6 GB) and Whisper model (~500 MB). 10–20 min on first launch depending on bandwidth.
+6. Grant microphone + screen recording permissions when prompted.
+
+Everything bundled: Python backend, Ollama daemon, Whisper. No external dependencies to install.
+
+### Option 2: Homebrew (for developers)
+
+```bash
+brew tap marlonxie/mimi
+brew install --cask mimi
+open -a MIMI
+```
+
+## Uninstall
+
+1. Quit MIMI (menu bar → 退出).
+2. Drag `/Applications/MIMI.app` to the Trash.
+3. *(Optional)* Remove ~3.5 GB of cached models and uploaded data:
+   ```bash
+   rm -rf ~/Library/Application\ Support/MIMI
+   rm -rf ~/Library/Caches/huggingface
+   rm -rf ~/Library/Logs/MIMI
+   rm -f  ~/Library/Preferences/com.marlon.MimiApp.plist
+   defaults delete com.marlon.MimiApp 2>/dev/null
+   ```
+4. *Or* drag MIMI.app onto [AppCleaner](https://freemacsoft.net/appcleaner/) (free, GUI) — it auto-detects all related files.
+
+API keys are stored in macOS Keychain; remove via Keychain Access → search "MIMI".
+
+---
+
+## Develop from source
 
 ```bash
 # 1. Clone
@@ -133,16 +174,17 @@ CLI alternative (advanced, e.g. for batch indexing): drop files into `~/Library/
 
 ### Where your data lives
 
-All user data — uploaded reference files, RAG vector index, exported transcripts — lives under `~/Library/Application Support/MIMI/`:
+All user data lives under `~/Library/Application Support/MIMI/`:
 
 ```
 ~/Library/Application Support/MIMI/
-├── resources/      ← uploaded PDFs / Markdown / text
-├── chroma_store/   ← RAG vector index (rebuilt from resources/)
-└── transcripts/    ← default export location (UI export goes wherever you choose)
+├── resources/        ← uploaded PDFs / Markdown / text
+├── chroma_store/     ← RAG vector index (rebuilt from resources/)
+├── ollama-models/    ← Qwen3-4B-Instruct (~2.6GB, downloaded on first launch)
+└── transcripts/      ← default export location (UI export goes wherever you choose)
 ```
 
-API keys are stored separately in macOS Keychain. To wipe everything: quit the app, then delete the `MIMI` folder and remove keys from Keychain Access.
+Whisper model (~500MB) lives under `~/Library/Caches/huggingface/`. API keys in macOS Keychain.
 
 ## Configuration
 

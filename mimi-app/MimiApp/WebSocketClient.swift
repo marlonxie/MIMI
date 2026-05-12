@@ -16,6 +16,7 @@ class WebSocketClient {
     var onResourcesList: (@MainActor (ResourcesListMessage) -> Void)?
     var onDeleteResourceAck: (@MainActor (DeleteResourceAckMessage) -> Void)?
     var onClearResourcesAck: (@MainActor (ClearResourcesAckMessage) -> Void)?
+    var onModelLoading: (@MainActor (ModelLoadingMessage) -> Void)?
 
     private var webSocket: URLSessionWebSocketTask?
     private var session: URLSession?
@@ -186,6 +187,10 @@ class WebSocketClient {
         case "clear_resources_ack":
             if let msg = try? JSONDecoder().decode(ClearResourcesAckMessage.self, from: data) {
                 onClearResourcesAck?(msg)
+            }
+        case "model_loading":
+            if let msg = try? JSONDecoder().decode(ModelLoadingMessage.self, from: data) {
+                onModelLoading?(msg)
             }
         default:
             break

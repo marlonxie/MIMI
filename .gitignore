@@ -26,6 +26,9 @@ mimi-app/DerivedData/
 mimi-app/MimiApp.xcodeproj/xcuserdata/
 mimi-app/MimiApp.xcodeproj/project.xcworkspace/xcuserdata/
 
+# Bundled binaries from official Ollama release (~377MB, redownload via curl + tar)
+mimi-app/external/
+
 # Runtime output
 mimi-backend/transcripts/
 
