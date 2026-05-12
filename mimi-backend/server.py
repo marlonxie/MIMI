@@ -646,7 +646,6 @@ if __name__ == "__main__":
     if args.prefetch_model:
         # 触发 mlx-whisper 模型从 HuggingFace 下载到 ~/.cache/huggingface/
         # 不启 WS server，下完即退出
-        import numpy as np
         from audio.stt_mlx import SpeechToText
         print("正在下载语音模型 (mlx-community/whisper-small-mlx, ~500MB)...")
         stt = SpeechToText()

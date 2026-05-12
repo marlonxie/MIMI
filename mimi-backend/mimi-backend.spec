@@ -27,6 +27,12 @@ tmp_ret = collect_all('sentence_transformers')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('langchain_huggingface')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+# sklearn — sentence_transformers v5 的 util/similarity.py 顶部 import
+# sklearn.metrics.pairwise_distances（util/__init__ 再 re-export cos_sim），
+# 缺 sklearn 整个 from sentence_transformers import 链 cascade fail。
+# 不能塞进 excludes。collect_all 拉全部子模块避免动态 import 漏。
+tmp_ret = collect_all('sklearn')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 
 a = Analysis(
@@ -38,8 +44,10 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    # excludes 改回最小：scikit-learn 真的没用，可以省 ~100MB
-    excludes=['sklearn'],
+    # sklearn 不可 exclude — sentence_transformers v5 util/similarity.py
+    # 顶部 import sklearn.metrics.pairwise_distances，chain 在 from
+    # sentence_transformers import 时 cascade fail（RAG 加载不了）。
+    excludes=[],
     noarchive=False,
     optimize=0,
 )
