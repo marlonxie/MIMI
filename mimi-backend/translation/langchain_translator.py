@@ -8,6 +8,19 @@ from langchain_core.output_parsers import StrOutputParser
 from llm import LLMManager
 
 
+# 翻译目标语言 ISO 639-1 → prompt 里展示用的语言名。
+# 新增 native 语言（如 ja / ko）时这里加一行。
+NATIVE_LANG_NAME: dict[str, str] = {
+    "zh": "中文",
+    "en": "English",
+    "de": "Deutsch",
+}
+# 面试源语言 → 中文展示名（prompt 是中文写的，源语言也用中文名）
+INTERVIEW_LANG_NAME: dict[str, str] = {
+    "en": "英语",
+    "de": "德语",
+}
+
 # 翻译 prompt 模板（面试场景化）
 # 设计原则基于翻译 prompt engineering 5 要素：
 #   1. 角色分配（role） — "科技行业口译员"（限定领域）
@@ -15,16 +28,19 @@ from llm import LLMManager
 #   3. 术语表（glossary） — 保留不翻译的技术名词 / 公司名 / 人名
 #   4. 少样本示例（few-shot） — 填充词 / 短句 / 技术名词 / 双语混合
 #   5. 约束（constraints） — 只返回译文、纯填充词返回空
-TRANSLATE_SYSTEM = """你是资深的科技行业口译员，专门负责英语→中文的实时面试字幕翻译。
+#
+# 所有"中文"/"英语"等字面语言名都换成 {native_language_name} / {interview_language_name}
+# 占位符，运行时由 set_native_language / set_interview_language 切换。
+TRANSLATE_SYSTEM = """你是资深的科技行业口译员，专门负责{interview_language_name}→{native_language_name}的实时面试字幕翻译。
 
-任务：将面试对话的英文片段翻译成自然流畅的中文字幕。
+任务：将面试对话的{interview_language_name}片段翻译成自然流畅的{native_language_name}字幕。
 
 === 翻译原则 ===
 
 1. 保留原文的专有名词和技术术语：
-   - 技术名词（React, TypeScript, Kubernetes, Docker, Python, JavaScript, AWS, LLM, API, SDK 等）→ 保留英文
-   - 公司/产品名（Google, OpenAI, Y-Combinator, Claude, GPT-4 等）→ 保留英文
-   - 人名 → 保留英文（除非是常见音译如"马斯克"）
+   - 技术名词（React, TypeScript, Kubernetes, Docker, Python, JavaScript, AWS, LLM, API, SDK 等）→ 保留原文
+   - 公司/产品名（Google, OpenAI, Y-Combinator, Claude, GPT-4 等）→ 保留原文
+   - 人名 → 保留原文（除非该 native 语言中有标准音译）
    - 编程语法片段（useState, async/await, map.filter）→ 保留原样
 
 2. 省略填充词和口语毛刺：
@@ -33,23 +49,23 @@ TRANSLATE_SYSTEM = """你是资深的科技行业口译员，专门负责英语�
    - 自我纠正（"I went to—I mean, I worked at"）→ 翻译修正后的内容
 
 3. 简短应答按语境意译：
-   - "Yeah" / "Yes" / "Right" / "OK" / "Sure" / "Exactly" → 根据对话语气译为"嗯/对/好/没错/当然"
-   - "Got it" / "Makes sense" / "Gotcha" → "明白/有道理/懂了"
+   - "Yeah" / "Yes" / "Right" / "OK" / "Sure" / "Exactly" → 根据对话语气译成 {native_language_name} 的自然口语短答
+   - "Got it" / "Makes sense" / "Gotcha" → {native_language_name} 的"明白"类应答
 
 4. 保持面试语气：
    - 面试官的话：礼貌、专业
    - 回答者的话：自信、简洁
 
 5. 双语混合输入：
-   - 如果原文已含中文，保留中文部分不动，只翻译英文部分
+   - 如果原文已含 {native_language_name}，保留 {native_language_name} 部分不动，只翻译 {interview_language_name} 部分
 
 === 输出约束 ===
 
-- 只返回中文翻译，不要解释
+- 只返回 {native_language_name} 翻译，不要解释
 - 不加引号、不加注释、不加"翻译如下"等前缀
 - 如果原文仅是填充词（如 "uh, um."）→ 返回空字符串
 
-=== 参考样例 ===
+=== 参考样例（{interview_language_name}→中文示意；其他 native 语言遵循同样原则）===
 
 原文: Um, I would say I have like three years of experience with React and Node.js.
 译文: 我有三年 React 和 Node.js 的经验。
@@ -62,9 +78,6 @@ TRANSLATE_SYSTEM = """你是资深的科技行业口译员，专门负责英语�
 
 原文: OK.
 译文: 好。
-
-原文: You know JavaScript 吗？
-译文: 你会 JavaScript 吗？
 
 === 对话上下文（最近几句） ===
 {context}"""
@@ -120,6 +133,21 @@ class Translator:
     def is_ready(self) -> bool:
         return self.chain is not None
 
+    def _build_invoke_kwargs(self, text: str, source_language: str | None, context: str) -> dict:
+        """统一组装 chain.invoke / ainvoke / astream 的输入字典。
+        把 interview/native 语言名注入 prompt 占位符。"""
+        # source_language 来自 STT 输出（en / de），None 时退到 "en" 兜底
+        src = source_language or "en"
+        interview_name = INTERVIEW_LANG_NAME.get(src, src)
+        native_name = NATIVE_LANG_NAME.get(self.native_language, self.native_language)
+        return {
+            "text": text,
+            "source_hint": self._get_source_hint(source_language),
+            "context": context or "",
+            "interview_language_name": interview_name,
+            "native_language_name": native_name,
+        }
+
     def translate(self, text: str, source_language: str = None, context: str = "") -> dict:
         """
         同步翻译
@@ -139,10 +167,7 @@ class Translator:
                 "source_language": source_language or "unknown",
             }
 
-        source_hint = self._get_source_hint(source_language)
-        translation = self.chain.invoke({
-            "text": text, "source_hint": source_hint, "context": context or ""
-        })
+        translation = self.chain.invoke(self._build_invoke_kwargs(text, source_language, context))
 
         return {
             "original": text,
@@ -163,10 +188,9 @@ class Translator:
                 "source_language": source_language or "unknown",
             }
 
-        source_hint = self._get_source_hint(source_language)
-        translation = await self.chain.ainvoke({
-            "text": text, "source_hint": source_hint, "context": context or ""
-        })
+        translation = await self.chain.ainvoke(
+            self._build_invoke_kwargs(text, source_language, context)
+        )
 
         return {
             "original": text,
@@ -184,27 +208,22 @@ class Translator:
         if not self.is_ready or not text or not text.strip():
             return
 
-        source_hint = self._get_source_hint(source_language)
-        async for chunk in self.chain.astream({
-            "text": text, "source_hint": source_hint, "context": context or ""
-        }):
+        async for chunk in self.chain.astream(
+            self._build_invoke_kwargs(text, source_language, context)
+        ):
             if chunk:
                 yield chunk
 
     def set_native_language(self, language: str) -> None:
-        """运行时切换翻译输出语言。
-
-        注意：当前 TRANSLATE_SYSTEM prompt 硬编码为"英→中"。
-        切到其他 native 语言需同步调整 prompt，否则翻译结果不变。
+        """运行时切换翻译输出语言。下一次 translate_* 调用立刻生效。
 
         Args:
-            language: ISO 639-1 代码（"zh" / "en" / ...）
+            language: ISO 639-1 代码（"zh" / "en" / "de"）
         """
         self.native_language = language
 
     @staticmethod
     def _get_source_hint(source_language: str = None) -> str:
         if source_language:
-            lang_map = {"en": "英语", "de": "德语"}
-            return lang_map.get(source_language, source_language)
+            return INTERVIEW_LANG_NAME.get(source_language, source_language)
         return ""
