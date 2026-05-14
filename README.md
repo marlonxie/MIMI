@@ -1,6 +1,14 @@
 # MIMI 面试助手
 
+[中文版](README.zh.md) · English
+
 Real-time interview assistant for Mandarin speakers doing English/German interviews. Captures system audio + microphone, transcribes with streaming Whisper, translates live to the native language, and optionally generates answer suggestions via RAG.
+
+## Privacy by default
+
+MIMI ships **Whisper** (speech-to-text) and **Ollama + Qwen3-4B** (translation / answer suggestions) and runs both **entirely on your Mac**. No audio, transcripts, or résumé content leave the device in the default configuration — there is no analytics endpoint and no telemetry. Suitable for interview prep where the audio is confidential.
+
+If you opt into a cloud LLM (Gemini / Claude / OpenAI) for better translation quality, only the translation prompt is sent to that provider, and your API key is stored locally in **macOS Keychain** — never written to disk in plaintext, never uploaded anywhere.
 
 ## What It Does
 
