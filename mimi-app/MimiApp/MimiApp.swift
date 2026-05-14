@@ -12,17 +12,14 @@ struct MimiApp: App {
     private var appState: AppState { appDelegate.appState }
 
     var body: some Scene {
-        MenuBarExtra("MIMI", systemImage: menuBarIcon) {
+        // MimiMenuBar asset 配了 template-rendering-intent=template，
+        // macOS 自动按浅色/深色模式反色，无需在 Swift 层切换图标。
+        MenuBarExtra("MIMI", image: "MimiMenuBar") {
             MenuBarView(appState: appState, appDelegate: appDelegate)
         }
         Settings {
             SettingsView(appState: appState)
         }
-    }
-
-    private var menuBarIcon: String {
-        guard appState.isCapturing else { return "mic" }
-        return appState.isMicrophoneEnabled ? "mic.fill" : "mic.slash.fill"
     }
 }
 
