@@ -91,6 +91,7 @@ struct SettingsView: View {
             Picker(appState.t("settings.api.provider"), selection: $appState.llmProvider) {
                 Text("Google Gemini").tag("gemini")
                 Text("Anthropic Claude").tag("claude")
+                Text("OpenAI").tag("openai")
                 Text(appState.t("settings.api.local")).tag("ollama")
             }
             .onChange(of: appState.llmProvider) { _, _ in

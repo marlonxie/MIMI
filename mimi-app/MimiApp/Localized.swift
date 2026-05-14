@@ -125,6 +125,7 @@ enum L {
                                           .de: "Nach Umschalten Schlüssel einfügen und „Speichern & Anwenden“ klicken"],
         "settings.api.providerName.gemini": [.zh: "Google Gemini", .en: "Google Gemini", .de: "Google Gemini"],
         "settings.api.providerName.claude": [.zh: "Anthropic Claude", .en: "Anthropic Claude", .de: "Anthropic Claude"],
+        "settings.api.providerName.openai": [.zh: "OpenAI", .en: "OpenAI", .de: "OpenAI"],
         "settings.api.providerName.ollama": [.zh: "Ollama (本地)", .en: "Ollama (local)", .de: "Ollama (lokal)"],
         "settings.api.keychainHint": [.zh: "Key 仅存 macOS Keychain，本地保存，不上传。",
                                       .en: "Key is stored only in macOS Keychain — local-only, never uploaded.",

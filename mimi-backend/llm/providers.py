@@ -26,6 +26,17 @@ PROVIDER_MAP: dict[str, dict] = {
         "default_model": "claude-sonnet-4-5-20250929",
         "kind": "remote",
     },
+    "openai": {
+        "lc": "openai",
+        "env": "OPENAI_API_KEY",
+        "api_kwarg": "openai_api_key",
+        # gpt-5-mini：production-stable since 2025 mid，OpenAI 官方定位 high-volume
+        # workloads；TTFT ~1s，$0.25/M in、$2/M out，跟 Gemini Flash 同档但稍贵。
+        # 选它而不是 gpt-5.4-mini 是因为后者太新没沉淀，本项目偏好稳定。
+        # 不选 gpt-4o-mini 是因为已 legacy，OpenAI 文档明确 grandfathered。
+        "default_model": "gpt-5-mini",
+        "kind": "remote",
+    },
     "ollama": {
         "lc": "ollama",                 # init_chat_model(..., model_provider="ollama")
         "env": None,                    # 本地 daemon，无需 api key
