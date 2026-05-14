@@ -123,6 +123,15 @@ struct ModelLoadingMessage: Codable {
     let status: String       // ollama 的 status 文案：pulling manifest / downloading / verifying sha256 / writing manifest / ready / ...
 }
 
+/// Backend lifecycle phase — Splash 加载页用。
+/// 后端启动 → 广播 "warming" → ensure_ollama_pulled + warmup translator/rag 并发跑
+/// → 全部完成广播 "ready" → 前端 Splash 关闭，主界面接管。
+/// pulling 状态由前端根据 modelProgress 是否非空派生（后端不重复广播）。
+struct LifecycleMessage: Codable {
+    let type: String   // "lifecycle"
+    let phase: String  // "warming" / "ready"
+}
+
 // MARK: - Client Messages
 
 struct ConfigMessage: Codable {

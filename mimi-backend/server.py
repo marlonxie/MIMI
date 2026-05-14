@@ -63,6 +63,9 @@ intent_classifier = None
 # 启动时 auto-pull Qwen3 可能在前端 WS 连接前就开始；后接的连接也能拿到最新进度（缓存在 last_model_progress）
 active_websockets: set[WebSocket] = set()
 last_model_progress: dict[str, dict] = {}  # model_name → {completed, total, status}
+# Splash 用：lifecycle phase 全局状态，新 WS 连上时回放
+# warming = 启动中 / ready = 全 warmup 完成可用
+last_lifecycle: dict | None = None
 
 
 async def broadcast_model_progress(model: str, completed: int, total: int, status: str):
@@ -151,6 +154,98 @@ async def ensure_ollama_model_pulled():
             print(f"[ollama] pull 失败: {e}")
 
 
+# ============================================================================
+# Lifecycle / Warmup pipeline — splash 加载页用
+# ============================================================================
+
+async def broadcast_lifecycle(phase: str):
+    """phase: warming / ready
+    pulling 状态由前端根据 modelProgress 是否非空派生（后端不重复广播）。"""
+    global last_lifecycle
+    msg = {"type": "lifecycle", "phase": phase}
+    last_lifecycle = msg
+    dead = []
+    for ws in list(active_websockets):
+        try:
+            await ws.send_json(msg)
+        except Exception:
+            dead.append(ws)
+    for ws in dead:
+        active_websockets.discard(ws)
+
+
+async def warmup_translator():
+    """用 Ollama 官方 preload endpoint（空 prompt → 只 load 权重，不生成 token）。
+    云端 provider（Gemini/Claude）跳过 — 没有冷启动概念。
+
+    依据：Ollama docs/api.md + server/sched.go:127，空 prompt POST /api/generate
+    返回 done_reason="load"，模型权重进 VRAM 但不跑 generation。比真实 chain 调用更轻。
+    """
+    import time
+    if llm_manager.active_provider != "ollama":
+        print(f"[warmup] translator: provider={llm_manager.active_provider}，跳过 Ollama preload")
+        return
+    base_url = llm_manager._ollama_base_url
+    if not base_url:
+        print("[warmup] translator: ollama base_url 未配，跳过")
+        return
+    from llm.providers import default_model_for
+    target_model = default_model_for("ollama")
+    t0 = time.monotonic()
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=120) as c:
+            r = await c.post(f"{base_url}/api/generate", json={
+                "model": target_model,
+                # 空 prompt → 仅 load 权重；keep_alive=30m 避免被 evict
+                "prompt": "",
+                "keep_alive": "30m",
+            })
+            r.raise_for_status()
+        print(f"[warmup] ollama Qwen3 loaded ({int((time.monotonic() - t0) * 1000)}ms)")
+    except Exception as e:
+        print(f"[warmup] translator skipped: {e}")
+
+
+async def warmup_rag():
+    """HuggingFaceEmbeddings 构造时已 load 到内存，但首次 embed_query 仍有
+    PyTorch JIT 成本。跑一次 dummy embed 消除。"""
+    import time
+    if rag_engine is None:
+        return
+    t0 = time.monotonic()
+    try:
+        await asyncio.to_thread(rag_engine.embeddings.embed_query, "warmup")
+        print(f"[warmup] rag embedding ({int((time.monotonic() - t0) * 1000)}ms)")
+    except Exception as e:
+        print(f"[warmup] rag skipped: {e}")
+
+
+# 注意：intent_classifier 跟 translator 共享 Ollama Qwen3 模型。translator preload
+# 把 Qwen3 权重 load 进 VRAM 后，intent 第一次调用已经热了。无需独立 warmup。
+
+
+async def _lifecycle_pipeline():
+    """lifespan 后台任务：pull → 并发 warmup → 广播 ready
+
+    时序：
+      1. 广播 warming（splash 显示转圈）
+      2. ensure_ollama_model_pulled：如缺模型，pull 期间走 model_loading 进度消息，
+         前端 splash 切到 pulling 状态展示进度条
+      3. 并发 warmup translator + rag（stt 已在 lifespan 同步路径里跑完）
+      4. 广播 ready（splash 关闭）
+    """
+    await broadcast_lifecycle("warming")
+    await ensure_ollama_model_pulled()
+    await asyncio.gather(
+        warmup_translator(),
+        warmup_rag(),
+        return_exceptions=True,
+    )
+    await broadcast_lifecycle("ready")
+    print("[lifecycle] ready")
+
+
 
 
 @asynccontextmanager
@@ -187,8 +282,9 @@ async def lifespan(app):
 
     print(f"服务运行在 {config['server']['host']}:{config['server']['port']}")
 
-    # 后台拉 Qwen3 模型（不阻塞 startup —— uvicorn 立刻接受 WS；前端 onboarding 拿进度）
-    asyncio.create_task(ensure_ollama_model_pulled())
+    # 后台 lifecycle pipeline：pull Qwen3（如缺）→ warmup translator/rag → 广播 ready
+    # 不阻塞 startup —— uvicorn 立刻接受 WS；前端 splash 通过 lifecycle 消息感知进度
+    asyncio.create_task(_lifecycle_pipeline())
 
     yield
 
@@ -228,11 +324,17 @@ async def websocket_endpoint(websocket: WebSocket):
     global rag_engine, intent_classifier
 
     await websocket.accept()
-    # 注册到 broadcast 列表 + 立刻推一次缓存的最新模型进度（onboarding 即用）
+    # 注册到 broadcast 列表 + 立刻推一次缓存的最新模型进度 / lifecycle phase
+    # （前端 splash 用 — 后接的连接也能拿到当前状态）
     active_websockets.add(websocket)
     for cached in last_model_progress.values():
         try:
             await websocket.send_json(cached)
+        except Exception:
+            pass
+    if last_lifecycle is not None:
+        try:
+            await websocket.send_json(last_lifecycle)
         except Exception:
             pass
 

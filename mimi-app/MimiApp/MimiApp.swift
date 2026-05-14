@@ -5,7 +5,11 @@ import UniformTypeIdentifiers
 @main
 struct MimiApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    @State private var appState = AppState()
+    // AppState 由 AppDelegate own（不再用 @State）：因为 LSUIElement=1 的 MenuBarExtra app
+    // 启动时 SwiftUI 不会主动渲染任何 view，.onAppear 要等用户点开菜单栏才 fire。
+    // AppDelegate.applicationDidFinishLaunching 是唯一可靠的 app-launch hook，需要在那里弹 splash。
+    // 让 AppDelegate own AppState 保证 applicationDidFinishLaunching 时一定能拿到。
+    private var appState: AppState { appDelegate.appState }
 
     var body: some Scene {
         MenuBarExtra("MIMI", systemImage: menuBarIcon) {
@@ -30,7 +34,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var captionsPanel: NSPanel?
     var suggestionPanel: NSPanel?
     var onboardingPanel: NSPanel?
-    weak var appState: AppState?
+    var splashPanel: NSPanel?
+    /// Splash 阶段已开过主面板？避免 lifecycle 抖动时 showAllPanels 被反复调。
+    private var mainPanelsShown: Bool = false
+    /// app-level AppState（own by AppDelegate 而不是 SwiftUI @State）
+    /// 为什么 own 在这里：LSUIElement=1 的 MenuBarExtra app 启动后 SwiftUI 不主动渲染任何 view，
+    /// 所以 .onAppear 要等用户点菜单栏才 fire。applicationDidFinishLaunching 是唯一可靠的
+    /// app-launch hook — 那时 appState 必须可用。让 AppDelegate own 保证可用性。
+    let appState = AppState()
 
     /// PyInstaller backend 进程管家。Release build（.app 内含 backend）会 spawn；
     /// Dev build（无 bundled backend）no-op，开发者手动 `python server.py`。
@@ -45,13 +56,38 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         backendLauncher.start()
     }
 
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // app-launch hook 在 MenuBarExtra app 上对 NSPanel 操作是可靠的（Process spawn 才不稳）。
+        // 双击 app → 立刻弹 splash 加载页。lifecycle=ready 后由 observeReadiness 关掉。
+        showSplash(appState: appState)
+        observeReadiness()
+    }
+
+    /// 监听 appState.isAppReady — ready 切 true 时关 splash 接主界面。
+    /// 用 Observation 框架的 withObservationTracking（@Observable 兼容）。
+    private func observeReadiness() {
+        withObservationTracking {
+            _ = appState.isAppReady
+        } onChange: { [weak self] in
+            // onChange 一次性 callback — 在 willSet 时机调用（值还没改）。重新订阅看新值。
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if self.appState.isAppReady {
+                    self.splashDidComplete(appState: self.appState)
+                } else {
+                    self.observeReadiness()  // 还没 ready，继续订阅下次变化
+                }
+            }
+        }
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         backendLauncher.stop()
     }
 
     /// 创建（如未创建）+ 显示三个 panel。AppState 的 captionsVisible/suggestionVisible 决定子窗是否一同打开。
     func showAllPanels(appState: AppState) {
-        self.appState = appState
+        // appState 由 AppDelegate own，不需要再赋值。保留参数签名以便 caller（MenuBarView）传 ref。
         appState.appDelegate = self
 
         if hubPanel == nil {
@@ -123,6 +159,41 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         panel.orderFrontRegardless()
     }
 
+    /// 启动后立刻弹 Splash 加载页（仅启动期，lifecycle=ready 后由 splashDidComplete 关掉）。
+    /// 由 applicationDidFinishLaunching 触发。
+    func showSplash(appState: AppState) {
+        guard splashPanel == nil else { return }
+        appState.appDelegate = self
+
+        // 启动 WS 连接（原来在 toggleMicrophone/toggleSystemAudio 里 lazy 触发，但 splash
+        // 阶段 toggle 还没跑，WS 不连后端的 lifecycle 消息收不到，splash 永远等下去 → 死锁）
+        if !appState.wsClient.isConnected {
+            appState.wsClient.connect()
+        }
+
+        let panel = makeFloatingPanel(
+            autosaveName: "MIMI.Splash.v1",
+            defaultRect: NSRect(x: 0, y: 0, width: 420, height: 280),
+            rootView: AnyView(SplashView(appState: appState)),
+            borderless: false
+        )
+        panel.title = "MIMI"
+        splashPanel = panel
+        panel.center()
+        panel.orderFrontRegardless()
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// AppState.isAppReady 切到 true 时调用 — 关 Splash，接 Onboarding（首次）/ 主面板（熟用户）。
+    /// 幂等：mainPanelsShown 标志防止 lifecycle 抖动重复触发。
+    func splashDidComplete(appState: AppState) {
+        guard !mainPanelsShown else { return }
+        mainPanelsShown = true
+        splashPanel?.close()
+        splashPanel = nil
+        showAllPanels(appState: appState)
+    }
+
     // MARK: 显示 / 最小化 / 关闭
 
     func applyCaptionsVisibility(_ visible: Bool) {
@@ -147,7 +218,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// 从最小化恢复。按 *Visible 状态决定子窗是否随 hub 一起出现。
     func restoreAll() {
-        guard let appState else { return }
         hubPanel?.orderFront(nil)
         applyCaptionsVisibility(appState.captionsVisible)
         applySuggestionVisibility(appState.suggestionVisible)
@@ -163,7 +233,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// NSOpenPanel 选文件 → 复制到 mimi-backend/resources/
     /// 本轮不自动触发 indexer（让用户手动 `python -m rag.indexer`）；下轮做自动
     func pickRagResources() {
-        let lang = appState?.uiLang ?? .zh
+        let lang = appState.uiLang
         let panel = NSOpenPanel()
         panel.title = L.t("upload.title", lang: lang)
         panel.allowsMultipleSelection = true
@@ -230,7 +300,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 触发后端重建索引；ack 由 AppState.setupCallbacks.onRebuildIndexAck 接到后弹完成提示
         // 不弹中间态（"正在处理"提示已被精简掉）：runModal 阻塞会卡住主线程，
         // 而后端 ack 通常 1-3s 内就会回来，直接等 ack 弹一次完成提示更顺畅。
-        appState?.wsClient.sendRebuildIndex()
+        appState.wsClient.sendRebuildIndex()
     }
 
     // MARK: Panel 创建
@@ -365,9 +435,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             isTerminating = true
             NSApp.terminate(nil)
         } else if p === captionsPanel {
-            appState?.captionsVisible = false
+            appState.captionsVisible = false
         } else if p === suggestionPanel {
-            appState?.suggestionVisible = false
+            appState.suggestionVisible = false
         }
     }
 
@@ -553,6 +623,22 @@ class AppState {
         var isReady: Bool { completed >= total && total > 0 }
     }
     var modelProgress: [String: ModelProgress] = [:]
+
+    /// 后端 lifecycle phase（Splash 加载页用）。
+    /// - `.warming`: 启动初期（包含 mlx 已加载 / 正在等 ollama pull / 在跑 translator warmup）
+    /// - `.pulling`: 正在 ollama pull Qwen3（前端根据 modelProgress 非空 + lifecycle=warming 派生）
+    /// - `.ready`: 全部 warmup 完成，第一句话可以零冷启
+    enum LifecyclePhase: String { case warming, ready }
+    var lifecyclePhase: LifecyclePhase = .warming
+
+    /// Splash 应该显示 = WS 没连上 或者 后端 lifecycle 还没 ready
+    var isAppReady: Bool { wsClient.isConnected && lifecyclePhase == .ready }
+
+    /// 派生：正在 pull 模型？给 Splash 切换 UI 用（warming 转圈 vs pulling 进度条）
+    var isPullingModel: Bool {
+        lifecyclePhase == .warming && !modelProgress.isEmpty
+            && modelProgress.values.contains { !$0.isReady }
+    }
 
     let wsClient = WebSocketClient()
     let audioCapture = AudioCaptureManager()
@@ -878,6 +964,14 @@ class AppState {
                 total: msg.total,
                 status: msg.status
             )
+        }
+
+        // 后端 lifecycle 阶段（splash 加载页用）— warming → ready 切换主界面
+        wsClient.onLifecycle = { [weak self] msg in
+            guard let self else { return }
+            if let phase = LifecyclePhase(rawValue: msg.phase) {
+                self.lifecyclePhase = phase
+            }
         }
 
         // 连接建立后才能可靠发消息（sendJSON 有 isConnected 守卫）

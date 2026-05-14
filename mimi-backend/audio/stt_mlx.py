@@ -47,16 +47,24 @@ class SpeechToText:
         """预热模型 — 第一次调用会下载权重 + Metal kernel 编译，约 30-60s。
 
         mlx-whisper 是 stateless 函数式 API，没有显式 model 对象。
-        这里跑一次空音频触发缓存加载。
+        warmup 必须走生产路径才能编译出对的 Metal kernel：
+        - transcribe.py:148 `pad_or_trim(mel, N_FRAMES)` 把任何输入 pad 到 30s，
+          所以 1s 输入足够编译 encoder kernel（跟真实 30s 音频一致）
+        - `word_timestamps=True` 激活独立的 DTW kernel，必须跟 transcribe_audio() 一致；
+          否则首次真实调用还要重编译 DTW，warmup 白做
         """
         print(f"正在加载 mlx-whisper 模型: {self.model_repo}...")
-        # 跑 0.5s 静音预热
-        warmup_audio = np.zeros(int(self.sample_rate * 0.5), dtype=np.float32)
+        # 1s 低能量噪声 + 生产参数（不要纯 0：可能走 VAD 短路径，编不出 decoder kernel）
+        warmup_audio = (np.random.randn(self.sample_rate) * 0.01).astype(np.float32)
         try:
             mlx_whisper.transcribe(
                 warmup_audio,
                 path_or_hf_repo=self.model_repo,
-                word_timestamps=False,
+                language=self.interview_language,    # 跟 transcribe_audio 一致
+                task="transcribe",
+                word_timestamps=True,                # ⚠️ 关键：DTW kernel 必须一致
+                condition_on_previous_text=False,
+                hallucination_silence_threshold=2.0,
             )
         except Exception as e:
             print(f"模型预热警告（可忽略）: {e}")
