@@ -1,8 +1,8 @@
-# MIMI 面试助手
+# MIMI — Interview Assistant
 
 [中文版](README.zh.md) · English
 
-Real-time interview assistant for Mandarin speakers doing English/German interviews. Captures system audio + microphone, transcribes with streaming Whisper, translates live to the native language, and optionally generates answer suggestions via RAG.
+Real-time interview assistant for macOS. Pick the **language you're being interviewed in** (English / German / ...) and **your native language** (Chinese / English / ...) — MIMI captures system audio + microphone, transcribes with streaming Whisper, translates live to your native language, and optionally generates answer suggestions via RAG.
 
 The captions + translation overlay works **anywhere on macOS** — Zoom / Teams / Meet / Webex / any video call app, lectures, podcasts, even a YouTube tab. If audio comes out of your speaker, MIMI can transcribe it.
 
@@ -10,7 +10,7 @@ The captions + translation overlay works **anywhere on macOS** — Zoom / Teams 
 |---|---|
 | ![Chinese-native English-interview demo](docs/screenshots/interview-zh.png) | ![English-native German-interview demo](docs/screenshots/interview-de.png) |
 
-> Demo screenshots taken against [a YouTube interview clip](https://www.youtube.com/results?search_query=mock+interview) playing in a browser tab. Same flow works against a live Zoom call.
+> Demo screenshots taken against a YouTube interview clip playing in a browser tab. Same flow works against a live Zoom call.
 
 ## Privacy by default
 
@@ -86,16 +86,14 @@ Manual override: click an interviewer subtitle row → 💡 icon appears → cli
 
 ## Requirements
 
-- macOS 14+ on Apple Silicon (M1/M2/M3)
-- Python 3.11+ (conda recommended)
-- Xcode 16+
+- macOS 15+ (Sequoia / Tahoe) on Apple Silicon (M1 / M2 / M3 / M4)
+- Python 3.11+ (conda recommended) — only needed for "Develop from source" path
+- Xcode 16+ — only needed for "Develop from source" path
 - **One** LLM backend:
   - **Local (default, recommended)** — Ollama daemon + Qwen3-4B-Instruct-2507 (zero API cost, offline, Apache 2.0)
   - Or cloud — Gemini / Claude / OpenAI API key
 
 ## Install (for end users)
-
-**Requirements**: macOS 15+ (Sequoia / Tahoe) on Apple Silicon (M1 / M2 / M3 / M4).
 
 ### Option 1: DMG (recommended, no terminal)
 
@@ -103,7 +101,7 @@ Manual override: click an interviewer subtitle row → 💡 icon appears → cli
 2. Double-click the `.dmg` to mount it.
 3. Drag the **MIMI** icon to the **Applications** folder shortcut.
 4. **First launch**: right-click `/Applications/MIMI.app` → **Open** → click "Open" in the dialog (one-time Gatekeeper bypass; Apple Developer ID notarization on the roadmap).
-5. Onboarding shows download progress for the local Qwen3 model (~2.6 GB) and Whisper model (~500 MB). 10–20 min on first launch depending on bandwidth.
+5. A splash screen shows download progress for the local Qwen3 model (~2.6 GB) and Whisper model (~500 MB). 10–20 min on first launch depending on bandwidth; subsequent launches are ~8 s of warmup.
 6. Grant microphone + screen recording permissions when prompted.
 
 Everything bundled: Python backend, Ollama daemon, Whisper. No external dependencies to install.
@@ -118,7 +116,7 @@ open -a MIMI
 
 ## Uninstall
 
-1. Quit MIMI (menu bar → 退出).
+1. Quit MIMI (menu bar → Quit).
 2. Drag `/Applications/MIMI.app` to the Trash.
 3. *(Optional)* Remove ~3.5 GB of cached models and uploaded data:
    ```bash
@@ -185,9 +183,9 @@ open ../mimi-app/MimiApp.xcodeproj
 
 ### (Optional) Upload reference files for AI suggestions
 
-In the running app: click the upload icon in the Hub bar (or open Settings → 参考资料 tab) and pick your résumé / project notes (`.pdf` / `.md` / `.txt`). The backend re-indexes automatically; suggestions will cite these files.
+In the running app: click the upload icon in the Hub bar (or open Settings → Reference Files tab) and pick your résumé / project notes (`.pdf` / `.md` / `.txt`). The backend re-indexes automatically; suggestions will cite these files.
 
-The Settings → 参考资料 tab also shows what's currently uploaded with per-file delete and a "clear all" button.
+The Settings → Reference Files tab also shows what's currently uploaded with per-file delete and a "clear all" button.
 
 CLI alternative (advanced, e.g. for batch indexing): drop files into `~/Library/Application Support/MIMI/resources/` and run `cd mimi-backend && python -m rag.indexer`.
 
@@ -212,7 +210,7 @@ All settings in [`mimi-backend/config.yaml`](mimi-backend/config.yaml). Key fiel
 ```yaml
 user:
   interview_language: "en"    # STT + translation source (en / de)
-  native_language: "zh"       # translation target (zh / en)
+  native_language: "zh"       # translation target (zh / en / de)
 
 stt:
   model_size: "small"         # tiny / base / small / medium / large

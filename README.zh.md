@@ -2,7 +2,7 @@
 
 中文 · [English](README.md)
 
-为中文母语者准备的实时英文/德文面试助手。原生 macOS app，捕获系统音频 + 麦克风，用流式 Whisper 实时转写，同步翻译成母语，可选用 RAG 生成答题提示。
+macOS 上的实时面试助手。Settings 里选你**正在被面试的语言**（英语 / 德语 / ...）和**你的母语**（中文 / 英语 / ...）—— MIMI 抓系统音频 + 麦克风，用流式 Whisper 实时转写，同步翻译成你的母语，可选用 RAG 生成答题提示。
 
 字幕 + 翻译悬浮窗**可以盖在 macOS 任何应用上面** —— Zoom / Teams / Meet / Webex 各种视频会议、网课、播客、YouTube 视频都行。只要声音从扬声器出来，MIMI 就能听并翻。
 
@@ -10,7 +10,7 @@
 |---|---|
 | ![中文母语者英语面试](docs/screenshots/interview-zh.png) | ![英文母语者德语面试](docs/screenshots/interview-de.png) |
 
-> 截图测试用的是浏览器里播 [一段 YouTube 模拟面试视频](https://www.youtube.com/results?search_query=mock+interview)。换成真实 Zoom 通话流程一样。
+> 截图测试用的是浏览器里播一段 YouTube 模拟面试视频。换成真实 Zoom 通话流程一样。
 
 ## 默认本地，保护隐私
 
@@ -86,9 +86,9 @@ Swift App (SwiftUI) ──WebSocket (binary PCM + JSON)──→ Python Backend 
 
 ## 系统要求
 
-- macOS 14+（推荐 15 / 26 Sequoia / Tahoe），Apple Silicon (M1 / M2 / M3 / M4)
-- Python 3.11+（conda 推荐）
-- Xcode 16+
+- macOS 15+ (Sequoia / Tahoe)，Apple Silicon (M1 / M2 / M3 / M4)
+- Python 3.11+（conda 推荐）— 仅"从源码开发"路径需要
+- Xcode 16+ — 仅"从源码开发"路径需要
 - **任选一个** LLM 后端：
   - **本地（默认推荐）** — Ollama daemon + Qwen3-4B-Instruct-2507（零费用、离线可用、Apache 2.0）
   - 或云端 — Gemini / Claude / OpenAI API key
@@ -101,7 +101,7 @@ Swift App (SwiftUI) ──WebSocket (binary PCM + JSON)──→ Python Backend 
 2. 双击 `.dmg` 挂载
 3. 拖 **MIMI** 图标到 **Applications** 快捷方式
 4. **首次启动**：右键 `/Applications/MIMI.app` → 「打开」→ 弹窗里再点「打开」（一次性绕 Gatekeeper；正式 Developer ID 公证在 roadmap）
-5. Splash 加载页显示模型下载进度（~3 GB：Qwen3 + Whisper），首次启动约 10-20 分钟
+5. Splash 加载页显示模型下载进度（~3 GB：Qwen3 + Whisper），首次启动约 10-20 分钟；后续启动约 8 秒预热
 6. 系统弹权限请求时授予麦克风 + 屏幕录制
 
 backend、Ollama daemon、Whisper 全部 bundled 进 app，**不需要装任何外部依赖**。
@@ -210,7 +210,7 @@ Whisper 模型 (~500MB) + sentence-transformer embedding (~90MB) 在 `~/.cache/h
 ```yaml
 user:
   interview_language: "en"    # STT + 翻译源 (en / de)
-  native_language: "zh"       # 翻译目标 (zh / en)
+  native_language: "zh"       # 翻译目标 (zh / en / de)
 
 stt:
   model_size: "small"         # tiny / base / small / medium / large
