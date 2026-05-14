@@ -4,6 +4,14 @@
 
 为中文母语者准备的实时英文/德文面试助手。原生 macOS app，捕获系统音频 + 麦克风，用流式 Whisper 实时转写，同步翻译成母语，可选用 RAG 生成答题提示。
 
+字幕 + 翻译悬浮窗**可以盖在 macOS 任何应用上面** —— Zoom / Teams / Meet / Webex 各种视频会议、网课、播客、YouTube 视频都行。只要声音从扬声器出来，MIMI 就能听并翻。
+
+| 英语面试 + 中文字幕/答题 | 德语面试 + 英文字幕/答题 |
+|---|---|
+| ![中文母语者英语面试](docs/screenshots/interview-zh.png) | ![英文母语者德语面试](docs/screenshots/interview-de.png) |
+
+> 截图测试用的是浏览器里播 [一段 YouTube 模拟面试视频](https://www.youtube.com/results?search_query=mock+interview)。换成真实 Zoom 通话流程一样。
+
 ## 默认本地，保护隐私
 
 MIMI 自带 **Whisper**（语音识别）和 **Ollama + Qwen3-4B**（翻译/答题建议），两者都**完全在你的 Mac 本机运行**。默认配置下音频、字幕、上传的简历内容**不会离开本机** —— 没有埋点、没有遥测、没有上传服务器。面试场景下的对话保密性可控。

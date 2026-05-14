@@ -4,6 +4,14 @@
 
 Real-time interview assistant for Mandarin speakers doing English/German interviews. Captures system audio + microphone, transcribes with streaming Whisper, translates live to the native language, and optionally generates answer suggestions via RAG.
 
+The captions + translation overlay works **anywhere on macOS** — Zoom / Teams / Meet / Webex / any video call app, lectures, podcasts, even a YouTube tab. If audio comes out of your speaker, MIMI can transcribe it.
+
+| English interview, Chinese captions / suggestions | German interview, English captions / suggestions |
+|---|---|
+| ![Chinese-native English-interview demo](docs/screenshots/interview-zh.png) | ![English-native German-interview demo](docs/screenshots/interview-de.png) |
+
+> Demo screenshots taken against [a YouTube interview clip](https://www.youtube.com/results?search_query=mock+interview) playing in a browser tab. Same flow works against a live Zoom call.
+
 ## Privacy by default
 
 MIMI ships **Whisper** (speech-to-text) and **Ollama + Qwen3-4B** (translation / answer suggestions) and runs both **entirely on your Mac**. No audio, transcripts, or résumé content leave the device in the default configuration — there is no analytics endpoint and no telemetry. Suitable for interview prep where the audio is confidential.
