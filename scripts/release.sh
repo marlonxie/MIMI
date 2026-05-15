@@ -85,8 +85,12 @@ mkdir -p "$DMG_STAGING"
 # 用 MIMI.app 作为可见名（cask 也是 rename 成 MIMI.app）
 ditto "$APP" "$DMG_STAGING/MIMI.app"
 
-# create-dmg 偶尔在 macOS 26 上 exit 2 但 dmg 已生成；用 || true 保守
-create-dmg \
+# LC_ALL=C：强制 hdiutil 用英文错误消息。create-dmg 内部 retry 逻辑用
+# `grep -w 'Resource busy'` 识别可重试错误；中文 locale 下 hdiutil 输出"资源忙"，
+# grep 不到，整个 retry 机制被绕过，第一次 Finder/Spotlight 占用 volume 就直接 fail。
+# 套 LC_ALL=C 恢复 retry，~31s 重试窗口内 Finder 通常会松开 lock。
+# create-dmg 偶尔在 macOS 26 上 exit 2 但 dmg 已生成；用 || true 保守。
+LC_ALL=C create-dmg \
     --volname "MIMI" \
     --window-pos 200 120 \
     --window-size 600 400 \
