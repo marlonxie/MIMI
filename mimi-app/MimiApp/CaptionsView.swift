@@ -149,23 +149,21 @@ struct TranslationRow: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-                // 💡 选中 + interviewer 时的提示按钮，iOS tinted button
-                if entry.speaker == "interviewer" {
-                    Button {
-                        onRequestSuggestion?()
-                    } label: {
-                        Image(systemName: "lightbulb.fill")
-                            .font(.system(size: 13, weight: .regular))
-                            .foregroundStyle(isSelected ? .white : .clear)
-                            .frame(width: 24, height: 24)
-                            .background(isSelected ? Theme.systemBlue : Color.clear)
-                            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.button,
-                                                        style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!isSelected)
-                    .help(suggestionTooltip)
+                // 💡 选中即可点（任一 speaker）；manual_suggest 后端对 speaker 无要求
+                Button {
+                    onRequestSuggestion?()
+                } label: {
+                    Image(systemName: "lightbulb.fill")
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundStyle(isSelected ? .white : .clear)
+                        .frame(width: 24, height: 24)
+                        .background(isSelected ? Theme.systemBlue : Color.clear)
+                        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.button,
+                                                    style: .continuous))
                 }
+                .buttonStyle(.plain)
+                .disabled(!isSelected)
+                .help(suggestionTooltip)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
