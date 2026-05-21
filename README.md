@@ -209,8 +209,8 @@ All settings in [`mimi-backend/config.yaml`](mimi-backend/config.yaml). Key fiel
 
 ```yaml
 user:
-  interview_language: "en"    # STT + translation source (en / de)
-  native_language: "zh"       # translation target (zh / en / de)
+  interview_language: "en"    # STT + translation source: en / de / es / fr / it / pt / nl / ja / ko / zh
+  native_language: "zh"       # translation target: zh / en / de / ja / es
 
 stt:
   model_size: "small"         # tiny / base / small / medium / large
@@ -230,6 +230,8 @@ audio:
 ```
 
 Runtime-mutable via the Swift Settings panel (Cmd+,): `interview_language`, `native_language`, `enable_suggestion`. Changes push to the backend over WebSocket without reconnecting.
+
+To add more languages, edit [`mimi-backend/i18n.py`](mimi-backend/i18n.py) — single source-of-truth for both the translator and RAG prompt language names.
 
 ## Troubleshooting
 

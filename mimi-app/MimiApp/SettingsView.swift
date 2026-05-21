@@ -37,11 +37,27 @@ struct SettingsView: View {
                    selection: $appState.interviewLanguage) {
                 Text("English").tag("en")
                 Text("Deutsch").tag("de")
+                Text("Español").tag("es")
+                Text("Français").tag("fr")
+                Text("Italiano").tag("it")
+                Text("Português").tag("pt")
+                Text("Nederlands").tag("nl")
+                Text("日本語").tag("ja")
+                Text("한국어").tag("ko")
+                Text("中文").tag("zh")
             }
             Picker(appState.t("settings.nativeLanguage"),
                    selection: $appState.nativeLanguage) {
                 Text("中文").tag("zh")
                 Text("English").tag("en")
+                Text("Deutsch").tag("de")
+                Text("日本語").tag("ja")
+                Text("Español").tag("es")
+            }
+            if ["ja", "es"].contains(appState.nativeLanguage) {
+                Text(appState.t("settings.nativeLanguage.cloudHint"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             Text(appState.t("settings.languageHint"))
                 .font(.caption)

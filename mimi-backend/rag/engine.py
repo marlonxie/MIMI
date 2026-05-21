@@ -9,9 +9,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
 from llm import LLMManager
-
-LANG_MAP = {"en": "English", "de": "German"}
-NATIVE_LANG_MAP = {"zh": "中文", "en": "English"}
+from i18n import en_name, native_name
 
 RAG_PROMPT = ChatPromptTemplate.from_messages([
     ("system", """你是实时面试答案助手。候选人母语是 {native_language_name}，面试语言是 {interview_language_name}。
@@ -165,8 +163,8 @@ class RAGEngine:
 
         Args:
             latest_text: 面试官最新说的话（或连续独白）
-            interview_language: 面试语言 ISO 代码（"en", "de"）
-            native_language: 用户母语 ISO 代码（"zh", "en"）
+            interview_language: 面试语言 ISO 代码（见 i18n.INTERVIEW_LANGS）
+            native_language: 用户母语 ISO 代码（见 i18n.NATIVE_LANGS）
             conversation_context: 格式化的对话上下文窗口
 
         Returns:
@@ -181,8 +179,8 @@ class RAGEngine:
             "context": context,
             "latest_text": latest_text,
             "conversation": conversation_context,
-            "interview_language_name": LANG_MAP.get(interview_language, "English"),
-            "native_language_name": NATIVE_LANG_MAP.get(native_language, "中文"),
+            "interview_language_name": en_name(interview_language, "English"),
+            "native_language_name": native_name(native_language, "中文"),
         })
 
         return {
@@ -207,8 +205,8 @@ class RAGEngine:
             "context": context,
             "latest_text": latest_text,
             "conversation": conversation_context,
-            "interview_language_name": LANG_MAP.get(interview_language, "English"),
-            "native_language_name": NATIVE_LANG_MAP.get(native_language, "中文"),
+            "interview_language_name": en_name(interview_language, "English"),
+            "native_language_name": native_name(native_language, "中文"),
         })
 
         return {

@@ -209,8 +209,8 @@ Whisper 模型 (~500MB) + sentence-transformer embedding (~90MB) 在 `~/.cache/h
 
 ```yaml
 user:
-  interview_language: "en"    # STT + 翻译源 (en / de)
-  native_language: "zh"       # 翻译目标 (zh / en / de)
+  interview_language: "en"    # STT + 翻译源：en / de / es / fr / it / pt / nl / ja / ko / zh
+  native_language: "zh"       # 翻译目标：zh / en / de / ja / es
 
 stt:
   model_size: "small"         # tiny / base / small / medium / large
@@ -230,6 +230,8 @@ audio:
 ```
 
 `interview_language` / `native_language` / `enable_suggestion` 运行时可改 —— Settings 推到 backend，不需要重连 WebSocket。
+
+要加更多语言，编辑 [`mimi-backend/i18n.py`](mimi-backend/i18n.py) —— translator 和 RAG prompt 共用的语言名 source of truth。
 
 ## 排错
 

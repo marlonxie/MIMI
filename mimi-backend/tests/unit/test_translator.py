@@ -232,11 +232,63 @@ def test_context_mixed_language():
     assert has_chinese, f"中英混合上下文下，翻译应为中文: {translation!r}"
 
 
+# ============================================================
+# Prompt 渲染（零依赖：不调 LLM，验证 i18n 接入正确）
+# ============================================================
+
+def test_invoke_kwargs_native_japanese():
+    """set_native_language("ja") → native_language_name 应为 '日本語'"""
+    translator = _new_translator()
+    translator.set_native_language("ja")
+    kwargs = translator._build_invoke_kwargs("Hello.", source_language="en", context="")
+    print(f"native=ja: native_language_name='{kwargs['native_language_name']}'")
+    assert kwargs["native_language_name"] == "日本語"
+
+
+def test_invoke_kwargs_interview_french():
+    """source_language='fr' → interview_language_name 应为 '法语'"""
+    translator = _new_translator()
+    kwargs = translator._build_invoke_kwargs("Bonjour.", source_language="fr", context="")
+    print(f"interview=fr: interview_language_name='{kwargs['interview_language_name']}'")
+    assert kwargs["interview_language_name"] == "法语"
+
+
+def test_invoke_kwargs_unknown_source_fallback():
+    """未知 source_language 代码 → fallback 到代码本身（不抛异常）"""
+    translator = _new_translator()
+    kwargs = translator._build_invoke_kwargs("...", source_language="xx", context="")
+    print(f"interview=xx: interview_language_name='{kwargs['interview_language_name']}'")
+    # i18n.zh_name 用 fallback 参数 src 本身
+    assert kwargs["interview_language_name"] == "xx"
+
+
+def test_invoke_kwargs_native_spanish():
+    """set_native_language("es") → native_language_name 应为 'Español'"""
+    translator = _new_translator()
+    translator.set_native_language("es")
+    kwargs = translator._build_invoke_kwargs("Hello.", source_language="en", context="")
+    print(f"native=es: native_language_name='{kwargs['native_language_name']}'")
+    assert kwargs["native_language_name"] == "Español"
+
+
 if __name__ == "__main__":
     print("=" * 50)
     print("MIMI 翻译模块测试 (LangChain + Gemini)")
     print("=" * 50)
     print("注意：需要设置 GOOGLE_API_KEY 环境变量\n")
+
+    print("--- Prompt 渲染：母语日语 ---")
+    test_invoke_kwargs_native_japanese()
+
+    print("\n--- Prompt 渲染：面试法语 ---")
+    test_invoke_kwargs_interview_french()
+
+    print("\n--- Prompt 渲染：未知源语言 fallback ---")
+    test_invoke_kwargs_unknown_source_fallback()
+
+    print("\n--- Prompt 渲染：母语西语 ---")
+    test_invoke_kwargs_native_spanish()
+
 
     print("--- 测试空文本 ---")
     test_translate_empty()

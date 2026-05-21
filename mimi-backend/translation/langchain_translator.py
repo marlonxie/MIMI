@@ -6,20 +6,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
 from llm import LLMManager
-
-
-# 翻译目标语言 ISO 639-1 → prompt 里展示用的语言名。
-# 新增 native 语言（如 ja / ko）时这里加一行。
-NATIVE_LANG_NAME: dict[str, str] = {
-    "zh": "中文",
-    "en": "English",
-    "de": "Deutsch",
-}
-# 面试源语言 → 中文展示名（prompt 是中文写的，源语言也用中文名）
-INTERVIEW_LANG_NAME: dict[str, str] = {
-    "en": "英语",
-    "de": "德语",
-}
+from i18n import native_name, zh_name
 
 # 翻译 prompt 模板（面试场景化）
 # 设计原则基于翻译 prompt engineering 5 要素：
@@ -136,16 +123,14 @@ class Translator:
     def _build_invoke_kwargs(self, text: str, source_language: str | None, context: str) -> dict:
         """统一组装 chain.invoke / ainvoke / astream 的输入字典。
         把 interview/native 语言名注入 prompt 占位符。"""
-        # source_language 来自 STT 输出（en / de），None 时退到 "en" 兜底
+        # source_language 来自 STT 输出（en / de / ja / ...），None 时退到 "en" 兜底
         src = source_language or "en"
-        interview_name = INTERVIEW_LANG_NAME.get(src, src)
-        native_name = NATIVE_LANG_NAME.get(self.native_language, self.native_language)
         return {
             "text": text,
             "source_hint": self._get_source_hint(source_language),
             "context": context or "",
-            "interview_language_name": interview_name,
-            "native_language_name": native_name,
+            "interview_language_name": zh_name(src, src),
+            "native_language_name": native_name(self.native_language, self.native_language),
         }
 
     def translate(self, text: str, source_language: str = None, context: str = "") -> dict:
@@ -225,5 +210,5 @@ class Translator:
     @staticmethod
     def _get_source_hint(source_language: str = None) -> str:
         if source_language:
-            return INTERVIEW_LANG_NAME.get(source_language, source_language)
+            return zh_name(source_language, source_language)
         return ""
